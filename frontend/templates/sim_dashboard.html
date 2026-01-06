@@ -7,6 +7,8 @@
 
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
     
     <!-- Leaflet Routing Machine CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
@@ -41,6 +43,79 @@
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
         min-height: 100vh;
         overflow-x: hidden;
+        display: flex;
+      }
+
+      .sidebar {
+        width: 250px;
+        background: linear-gradient(135deg, #0a192f 0%, #1e3a8a 100%);
+        color: white;
+        height: 100vh;
+        position: fixed;
+        left: 0;
+        top: 0;
+        overflow-y: auto;
+        box-shadow: 5px 0 20px rgba(0, 0, 0, 0.1);
+        z-index: 100;
+      }
+
+      .sidebar-header {
+        padding: 30px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        text-align: center;
+      }
+
+      .sidebar-header h2 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        background: linear-gradient(90deg, #60a5fa, #93c5fd);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 5px;
+      }
+
+      .sidebar-header p {
+        color: #94a3b8;
+        font-size: 0.9rem;
+      }
+
+      .nav-links {
+        padding: 20px 0;
+      }
+
+      .nav-item {
+        padding: 15px 25px;
+        color: #cbd5e1;
+        text-decoration: none;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        transition: all 0.3s ease;
+        border-left: 3px solid transparent;
+      }
+
+      .nav-item:hover {
+        background: rgba(59, 130, 246, 0.1);
+        color: white;
+        border-left-color: #3b82f6;
+      }
+
+      .nav-item.active {
+        background: rgba(59, 130, 246, 0.2);
+        color: white;
+        border-left-color: #3b82f6;
+      }
+
+      .nav-item i {
+        width: 20px;
+        text-align: center;
+      }
+
+      .main-content {
+        flex: 1;
+        margin-left: 250px;
+        min-height: 100vh;
+        width: calc(100% - 250px);
       }
 
       .wrap {
@@ -416,14 +491,15 @@
       }
 
       .weight-label {
-        background: rgba(2, 6, 23, 0.85);
-        color: rgba(226, 232, 240, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(248, 250, 252, 0.95);
+        color: #0f172a;
+        border: 1px solid rgba(15, 23, 42, 0.1);
         border-radius: 12px;
         padding: 4px 8px;
-        font: 11px system-ui;
+        font: 700 11px system-ui;
         white-space: nowrap;
         pointer-events: none;
+        box-shadow: 0 8px 16px rgba(15, 23, 42, 0.2);
       }
 
       .overlayTopRight {
@@ -570,7 +646,49 @@
   </head>
 
   <body>
-    <div class="wrap">
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <h2>Transport Hub</h2>
+        <p>Administrator Panel</p>
+      </div>
+      <div class="nav-links">
+        <a href="{{ url_for('admin_dashboard') }}" class="nav-item">
+          <i class="fas fa-tachometer-alt"></i>
+          <span>Dashboard</span>
+        </a>
+        <a href="#" class="nav-item">
+          <i class="fas fa-users"></i>
+          <span>Passengers</span>
+        </a>
+        <a href="{{ url_for('admin_bus_management') }}" class="nav-item">
+          <i class="fas fa-bus"></i>
+          <span>Bus Management</span>
+        </a>
+        <a href="{{ url_for('sim_dashboard') }}" class="nav-item active">
+          <i class="fas fa-project-diagram"></i>
+          <span>Simulation</span>
+        </a>
+        <a href="{{ url_for('admin_routes') }}" class="nav-item">
+          <i class="fas fa-route"></i>
+          <span>Routes</span>
+        </a>
+        <a href="#" class="nav-item">
+          <i class="fas fa-chart-line"></i>
+          <span>Analytics</span>
+        </a>
+        <a href="#" class="nav-item">
+          <i class="fas fa-cog"></i>
+          <span>Settings</span>
+        </a>
+        <a href="{{ url_for('logout') }}" class="nav-item">
+          <i class="fas fa-sign-out-alt"></i>
+          <span>Logout</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="wrap">
       <div class="topbar">
         <div class="title">
           <h2>🚌 Lahore Transit Simulation - Live Map</h2>
@@ -770,6 +888,7 @@
             Zoom: <span id="zoomLevel">12</span> | Stops: <span id="stopCount">0</span>
           </div>
         </div>
+      </div>
       </div>
     </div>
 

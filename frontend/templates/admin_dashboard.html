@@ -517,7 +517,7 @@
         </div>
         
         <div class="nav-links">
-            <a href="#" class="nav-item active">
+            <a href="{{ url_for('admin_dashboard') }}" class="nav-item active">
                 <i class="fas fa-tachometer-alt"></i>
                 <span>Dashboard</span>
             </a>
@@ -529,11 +529,10 @@
                 <i class="fas fa-bus"></i>
                 <span>Bus Management</span>
             </a>
-            <a href="{{ url_for('sim_dashboard') }}" class="dashboard-card">
-  <h3>Simulation</h3>
-  <p>Graph + Dijkstra + route animation</p>
-</a>
-
+            <a href="{{ url_for('sim_dashboard') }}" class="nav-item">
+                <i class="fas fa-project-diagram"></i>
+                <span>Simulation</span>
+            </a>
             <a href="{{ url_for('admin_routes') }}" class="nav-item">
                 <i class="fas fa-route"></i>
                 <span>Routes</span>
