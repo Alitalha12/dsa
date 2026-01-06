@@ -30,6 +30,41 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     c = 2 * asin(sqrt(a))
     return R * c
 
+DEFAULT_SERVICE_CALENDAR = {
+    "weekday": {"start_time": "06:00", "end_time": "22:00", "headway_minutes": 15},
+    "weekend": {"start_time": "08:00", "end_time": "20:00", "headway_minutes": 20},
+}
+
+def _parse_time(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value).strip(), "%H:%M").time()
+    except ValueError:
+        return None
+
+def _get_route_service_window(route, travel_date):
+    calendar = route.get("service_calendar") if isinstance(route, dict) else {}
+    calendar = calendar if isinstance(calendar, dict) else {}
+    schedule = {
+        "weekday": {**DEFAULT_SERVICE_CALENDAR["weekday"], **calendar.get("weekday", {})},
+        "weekend": {**DEFAULT_SERVICE_CALENDAR["weekend"], **calendar.get("weekend", {})},
+    }
+    day_key = "weekday"
+    if isinstance(travel_date, datetime):
+        day_key = "weekend" if travel_date.weekday() >= 5 else "weekday"
+    day_schedule = schedule[day_key]
+    headway = day_schedule.get("headway_minutes", DEFAULT_SERVICE_CALENDAR[day_key]["headway_minutes"])
+    try:
+        headway = int(headway)
+    except (TypeError, ValueError):
+        headway = DEFAULT_SERVICE_CALENDAR[day_key]["headway_minutes"]
+    return {
+        "start_time": day_schedule["start_time"],
+        "end_time": day_schedule["end_time"],
+        "headway_minutes": headway,
+    }
+
 def _coord_index(routes_data):
     """
     stop_name -> (lat,lng)
@@ -159,7 +194,17 @@ def _build_weighted_graph(routes_data, sim_data=None):
 
             # 1) preferred: routes.json schema
             w = None
-            if i + 1 < len(stop_dicts):
+            dep_time = _parse_time(stop_dicts[i].get("departure_time") or stop_dicts[i].get("arrival_time"))
+            arr_time = _parse_time(stop_dicts[i + 1].get("arrival_time") or stop_dicts[i + 1].get("departure_time"))
+            if dep_time and arr_time:
+                dep_dt = datetime.combine(datetime.today(), dep_time)
+                arr_dt = datetime.combine(datetime.today(), arr_time)
+                delta_minutes = int((arr_dt - dep_dt).total_seconds() / 60)
+                if delta_minutes <= 0:
+                    delta_minutes += 24 * 60
+                if delta_minutes > 0:
+                    w = float(delta_minutes)
+            if w is None and i + 1 < len(stop_dicts):
                 w = _safe_distance(stop_dicts[i + 1].get("distance_from_previous"), None)
 
             # 2) legacy sim_distances
@@ -469,12 +514,74 @@ class MaxHeapBusPriority:
 
 class BusManager:
     """Main Bus Management System"""
-    def __init__(self, data_file='data/buses.json'):
+    def __init__(self, data_file='data/buses.json', routes_file=None):
         self.data_file = data_file
+        self.routes_file = routes_file
+        self.routes_index = {}
         self.bus_list = DoublyLinkedListBus()
         self.min_heap_arrival = MinHeapBusArrival()
         self.max_heap_priority = MaxHeapBusPriority()
+        self.load_routes()
         self.load_data()
+
+    def load_routes(self):
+        """Load routes for schedule lookup."""
+        self.routes_index = {"by_id": {}, "by_name": {}}
+        if not self.routes_file or not os.path.exists(self.routes_file):
+            return
+        try:
+            with open(self.routes_file, 'r') as f:
+                data = json.load(f)
+            routes_list = data.get('routes', []) if isinstance(data, dict) else []
+            for route in routes_list:
+                if not isinstance(route, dict):
+                    continue
+                route_id = route.get('route_id')
+                route_name = route.get('route_name')
+                if route_id:
+                    self.routes_index["by_id"][str(route_id)] = route
+                if route_name:
+                    self.routes_index["by_name"][route_name] = route
+        except Exception as e:
+            print(f"Error loading routes for bus schedule: {e}")
+
+    def _find_route_for_bus(self, bus):
+        route_id = bus.get('route_id')
+        route_name = bus.get('route_name')
+        if route_id and str(route_id) in self.routes_index["by_id"]:
+            return self.routes_index["by_id"][str(route_id)]
+        if route_name and route_name in self.routes_index["by_name"]:
+            return self.routes_index["by_name"][route_name]
+        return None
+
+    def _compute_next_arrival(self, route, current_dt):
+        service = _get_route_service_window(route, current_dt)
+        start_time = _parse_time(service["start_time"])
+        end_time = _parse_time(service["end_time"])
+        if not start_time or not end_time:
+            return "08:00"
+        headway = service["headway_minutes"]
+        base_dt = datetime.combine(current_dt.date(), start_time)
+        end_dt = datetime.combine(current_dt.date(), end_time)
+        if current_dt <= base_dt:
+            return base_dt.strftime("%H:%M")
+        if headway <= 0:
+            return base_dt.strftime("%H:%M")
+        diff_minutes = int((current_dt - base_dt).total_seconds() / 60)
+        intervals = (diff_minutes + headway - 1) // headway
+        next_dt = base_dt + timedelta(minutes=intervals * headway)
+        if next_dt > end_dt:
+            return base_dt.strftime("%H:%M")
+        return next_dt.strftime("%H:%M")
+
+    def _normalize_next_arrival(self, bus):
+        if bus.get('next_arrival') not in (None, "", "auto"):
+            return
+        route = self._find_route_for_bus(bus)
+        if not route:
+            bus['next_arrival'] = bus.get('next_arrival', '08:00') or '08:00'
+            return
+        bus['next_arrival'] = self._compute_next_arrival(route, datetime.now())
     
     def load_data(self):
         """Load bus data from JSON file"""
@@ -483,6 +590,7 @@ class BusManager:
                 with open(self.data_file, 'r') as f:
                     buses = json.load(f)
                     for bus in buses:
+                        self._normalize_next_arrival(bus)
                         self.bus_list.add_bus(bus)
                         self.min_heap_arrival.push(bus)
                         self.max_heap_priority.push(bus)
@@ -512,6 +620,8 @@ class BusManager:
         bus_data['created_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         bus_data['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        self._normalize_next_arrival(bus_data)
+
         # Add to data structures
         self.bus_list.add_bus(bus_data)
         self.min_heap_arrival.push(bus_data)
@@ -621,7 +731,7 @@ class BusManager:
 
 # Initialize Bus Manager
 buses_file = os.path.join(data_dir, 'buses.json')
-bus_manager = BusManager(buses_file)
+bus_manager = BusManager(buses_file, routes_file=routes_file)
 
 # ==================== HELPER FUNCTIONS ====================
 

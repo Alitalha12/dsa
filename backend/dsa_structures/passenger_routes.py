@@ -7,7 +7,7 @@ Passenger Ticket Booking System with Data Structures
 """
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Any
 import heapq
@@ -596,9 +596,15 @@ class PassengerBookingSystem:
             booked_seats = self.booked_seats.get(bus_key, set())
             available_seats = bus.get('capacity', 50) - len(booked_seats)
             
-            # Calculate departure and arrival times
-            departure_time = self._calculate_departure_time(stops, from_stop)
-            arrival_time = self._calculate_arrival_time(stops, from_stop, to_stop, departure_time)
+            schedule = self._get_service_window(route, date)
+            if not schedule:
+                continue
+
+            reference_time = current_time.time() if travel_datetime.date() == current_time.date() else None
+            departure_time = self._calculate_departure_time(route, from_stop, date, reference_time=reference_time)
+            if not departure_time:
+                continue
+            arrival_time = self._calculate_arrival_time(route, from_stop, to_stop, departure_time)
             
             bus_info = {
                 'bus_number': bus['bus_number'],
@@ -614,7 +620,7 @@ class PassengerBookingSystem:
                 'to_stop': to_stop,
                 'departure_time': departure_time,
                 'arrival_time': arrival_time,
-                'estimated_travel_time': self._calculate_travel_time(stops, from_idx, to_idx),
+                'estimated_travel_time': self._calculate_travel_time(route, from_idx, to_idx),
                 'fare': self._calculate_fare(from_idx, to_idx, bus.get('type', 'regular'))
             }
             
@@ -625,44 +631,139 @@ class PassengerBookingSystem:
         
         return available_buses
     
-    def _calculate_departure_time(self, stops: List[str], from_stop: str) -> str:
-        """Calculate departure time from a stop"""
-        # Base departure at 08:00 from first stop
-        base_time = datetime.strptime("08:00", "%H:%M")
-        
-        if from_stop in stops:
-            index = stops.index(from_stop)
-            # Add 10 minutes for each stop before
-            departure_time = base_time + timedelta(minutes=index * 10)
-            return departure_time.strftime("%H:%M")
-        
-        return "08:00"
-    
-    def _calculate_arrival_time(self, stops: List[str], from_stop: str, to_stop: str, departure: str) -> str:
-        """Calculate arrival time"""
-        if from_stop in stops and to_stop in stops:
-            from_idx = stops.index(from_stop)
-            to_idx = stops.index(to_stop)
-            
-            # 10 minutes travel + 2 minutes wait per stop
-            travel_minutes = (to_idx - from_idx) * 12
-            
+    def _calculate_arrival_time(self, route: Dict, from_stop: str, to_stop: str, departure: str) -> str:
+        """Calculate arrival time using timetable or fallbacks."""
+        stops = route.get('stops', [])
+        stop_names = [s.get('stop_name') for s in stops]
+        if from_stop in stop_names and to_stop in stop_names:
+            from_idx = stop_names.index(from_stop)
+            to_idx = stop_names.index(to_stop)
+
+            travel_minutes = self._calculate_travel_minutes(stops, from_idx, to_idx)
             departure_time = datetime.strptime(departure, "%H:%M")
             arrival_time = departure_time + timedelta(minutes=travel_minutes)
-            
             return arrival_time.strftime("%H:%M")
-        
+
         return "09:00"
     
-    def _calculate_travel_time(self, stops: List[str], from_idx: int, to_idx: int) -> str:
+    def _calculate_travel_time(self, route: Dict, from_idx: int, to_idx: int) -> str:
         """Calculate travel time between stops"""
-        travel_minutes = (to_idx - from_idx) * 12
+        travel_minutes = self._calculate_travel_minutes(route.get('stops', []), from_idx, to_idx)
         hours = travel_minutes // 60
         minutes = travel_minutes % 60
         
         if hours > 0:
             return f"{hours}h {minutes}m"
         return f"{minutes}m"
+
+    def _calculate_travel_minutes(self, stops: List[Dict], from_idx: int, to_idx: int) -> int:
+        """Calculate travel minutes between two stop indexes."""
+        if to_idx <= from_idx:
+            return 0
+
+        travel_minutes = 0
+        for idx in range(from_idx, to_idx):
+            travel_minutes += 10
+            travel_minutes += int(stops[idx + 1].get('wait_time', 0) or 0)
+        return travel_minutes
+
+    def _get_service_window(self, route: Dict, travel_date: str) -> Optional[Dict]:
+        """Get service window for a route on a given date."""
+        default_calendar = {
+            "weekday": {"start_time": "06:00", "end_time": "22:00", "headway_minutes": 15},
+            "weekend": {"start_time": "08:00", "end_time": "20:00", "headway_minutes": 20},
+        }
+        service_calendar = route.get('service_calendar') or {}
+        service_calendar = {
+            "weekday": {**default_calendar["weekday"], **service_calendar.get("weekday", {})},
+            "weekend": {**default_calendar["weekend"], **service_calendar.get("weekend", {})},
+        }
+
+        try:
+            travel_day = datetime.strptime(travel_date, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            travel_day = datetime.now().date()
+
+        day_key = "weekend" if travel_day.weekday() >= 5 else "weekday"
+        schedule = service_calendar.get(day_key, {})
+        start_time = schedule.get("start_time", default_calendar[day_key]["start_time"])
+        end_time = schedule.get("end_time", default_calendar[day_key]["end_time"])
+        headway_minutes = schedule.get("headway_minutes", route.get("headway_minutes", default_calendar[day_key]["headway_minutes"]))
+
+        try:
+            headway_minutes = int(headway_minutes)
+        except (TypeError, ValueError):
+            headway_minutes = default_calendar[day_key]["headway_minutes"]
+
+        return {
+            "day_key": day_key,
+            "start_time": start_time,
+            "end_time": end_time,
+            "headway_minutes": headway_minutes,
+        }
+
+    def _calculate_departure_time(
+        self,
+        route: Dict,
+        from_stop: str,
+        travel_date: str,
+        reference_time: Optional[time] = None,
+    ) -> Optional[str]:
+        """Calculate next departure time from a stop using route timetable."""
+        service = self._get_service_window(route, travel_date)
+        if not service:
+            return None
+
+        stops = route.get('stops', [])
+        stop_names = [s.get('stop_name') for s in stops]
+        if from_stop not in stop_names:
+            return None
+
+        start_time = datetime.strptime(service["start_time"], "%H:%M")
+        stop_idx = stop_names.index(from_stop)
+        stop = stops[stop_idx]
+
+        base_departure = None
+        if stop.get('departure_time'):
+            base_departure = datetime.strptime(stop['departure_time'], "%H:%M")
+        elif stop.get('arrival_time'):
+            base_departure = datetime.strptime(stop['arrival_time'], "%H:%M")
+
+        if not base_departure:
+            offset_minutes = 0
+            for idx in range(stop_idx):
+                offset_minutes += 10
+                offset_minutes += int(stops[idx].get('wait_time', 0) or 0)
+            base_departure = start_time + timedelta(minutes=offset_minutes)
+
+        if reference_time is None:
+            return base_departure.strftime("%H:%M")
+
+        headway = stop.get('headway_minutes', service["headway_minutes"])
+        try:
+            headway = int(headway)
+        except (TypeError, ValueError):
+            headway = service["headway_minutes"]
+
+        end_time = datetime.strptime(service["end_time"], "%H:%M")
+        reference_dt = datetime.combine(datetime.today(), reference_time)
+        base_dt = datetime.combine(reference_dt.date(), base_departure.time())
+        end_dt = datetime.combine(reference_dt.date(), end_time.time())
+
+        if reference_dt <= base_dt:
+            return base_dt.strftime("%H:%M")
+
+        if headway <= 0:
+            return None
+
+        diff_minutes = int((reference_dt - base_dt).total_seconds() / 60)
+        intervals = (diff_minutes + headway - 1) // headway
+        next_departure = base_dt + timedelta(minutes=intervals * headway)
+
+        if next_departure > end_dt:
+            return None
+
+        return next_departure.strftime("%H:%M")
     
     def _calculate_fare(self, from_idx: int, to_idx: int, bus_type: str) -> float:
         """Calculate fare based on distance and bus type"""
@@ -734,8 +835,10 @@ class PassengerBookingSystem:
             return {'success': False, 'message': 'No seats available'}
         
         # Calculate timings
-        departure_time = self._calculate_departure_time(stops, from_stop)
-        arrival_time = self._calculate_arrival_time(stops, from_stop, to_stop, departure_time)
+        departure_time = self._calculate_departure_time(route, from_stop, travel_date)
+        if not departure_time:
+            return {'success': False, 'message': 'No scheduled departures available for the selected date'}
+        arrival_time = self._calculate_arrival_time(route, from_stop, to_stop, departure_time)
         
         # Create ticket
         ticket = Ticket(
