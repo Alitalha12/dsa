@@ -9,6 +9,36 @@ from datetime import datetime
 import os
 from .linked_list import LinkedList
 
+DEFAULT_SERVICE_CALENDAR = {
+    "weekday": {"start_time": "06:00", "end_time": "22:00", "headway_minutes": 15},
+    "weekend": {"start_time": "08:00", "end_time": "20:00", "headway_minutes": 20},
+}
+
+def _normalize_time(value):
+    """Normalize time to HH:MM format or return None."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        parsed = datetime.strptime(value.strip(), "%H:%M")
+        return parsed.strftime("%H:%M")
+    raise ValueError("Time must be a string in HH:MM format")
+
+def _safe_normalize_time(value):
+    """Normalize time for loading; returns None on invalid input."""
+    try:
+        return _normalize_time(value)
+    except ValueError:
+        return None
+
+def _merge_service_calendar(calendar):
+    """Ensure service calendar has weekday/weekend defaults."""
+    merged = {"weekday": {}, "weekend": {}}
+    for key in merged.keys():
+        merged[key].update(DEFAULT_SERVICE_CALENDAR.get(key, {}))
+        if isinstance(calendar, dict) and isinstance(calendar.get(key), dict):
+            merged[key].update(calendar[key])
+    return merged
+
 class RouteManager:
     """Manages bus routes using Linked List data structure"""
     
@@ -97,12 +127,17 @@ class RouteManager:
         if isinstance(route_data, dict):
             route.route_id = route_data.get('route_id', str(uuid.uuid4()))
             route.route_name = route_data.get('route_name', 'Unnamed Route')
+            route.headway_minutes = route_data.get('headway_minutes', DEFAULT_SERVICE_CALENDAR["weekday"]["headway_minutes"])
+            route.service_calendar = _merge_service_calendar(route_data.get('service_calendar'))
             route.size = 0  # Initialize size
             
             # Add all stops to linked list
             for stop_data in route_data.get('stops', []):
                 if stop_data and isinstance(stop_data, dict):  # Validate stop_data
                     stop_data.setdefault('distance_from_previous', 0)
+                    stop_data['arrival_time'] = _safe_normalize_time(stop_data.get('arrival_time')) if 'arrival_time' in stop_data else None
+                    stop_data['departure_time'] = _safe_normalize_time(stop_data.get('departure_time')) if 'departure_time' in stop_data else None
+                    stop_data.setdefault('headway_minutes', route.headway_minutes)
                     route.add_last(stop_data)
         else:
             # If route_data is already a LinkedList or unexpected type
@@ -129,6 +164,8 @@ class RouteManager:
                 route_data = {
                     'route_id': route.route_id,
                     'route_name': route.route_name,
+                    'headway_minutes': getattr(route, 'headway_minutes', DEFAULT_SERVICE_CALENDAR["weekday"]["headway_minutes"]),
+                    'service_calendar': getattr(route, 'service_calendar', _merge_service_calendar({})),
                     'created_at': datetime.now().isoformat(),
                     'total_stops': len(route),
                     'stops': route.to_list() if hasattr(route, 'to_list') else []
@@ -190,6 +227,8 @@ class RouteManager:
         route = LinkedList()
         route.route_id = str(uuid.uuid4())
         route.route_name = route_name_clean
+        route.headway_minutes = DEFAULT_SERVICE_CALENDAR["weekday"]["headway_minutes"]
+        route.service_calendar = _merge_service_calendar({})
         
         print(f"Created route with ID: {route.route_id}")
         
@@ -259,6 +298,23 @@ class RouteManager:
 
             stop_data['distance_from_previous'] = dist
 
+            if 'arrival_time' in stop_data:
+                stop_data['arrival_time'] = _normalize_time(stop_data.get('arrival_time'))
+            else:
+                stop_data['arrival_time'] = None
+
+            if 'departure_time' in stop_data:
+                stop_data['departure_time'] = _normalize_time(stop_data.get('departure_time'))
+            else:
+                stop_data['departure_time'] = None
+
+            stop_data.setdefault('headway_minutes', getattr(route, 'headway_minutes', DEFAULT_SERVICE_CALENDAR["weekday"]["headway_minutes"]))
+            if stop_data.get('headway_minutes') is not None:
+                try:
+                    stop_data['headway_minutes'] = int(stop_data['headway_minutes'])
+                except (TypeError, ValueError):
+                    raise ValueError("headway_minutes must be an integer")
+
             
             stop_data['added_at'] = datetime.now().isoformat()
             
@@ -312,6 +368,24 @@ class RouteManager:
             if d < 0:
                 raise ValueError("distance_from_previous must be 0 or a positive number")
             updated_data['distance_from_previous'] = d
+
+        if 'arrival_time' not in updated_data:
+            updated_data['arrival_time'] = existing_stop.get('arrival_time')
+        else:
+            updated_data['arrival_time'] = _normalize_time(updated_data.get('arrival_time'))
+
+        if 'departure_time' not in updated_data:
+            updated_data['departure_time'] = existing_stop.get('departure_time')
+        else:
+            updated_data['departure_time'] = _normalize_time(updated_data.get('departure_time'))
+
+        if 'headway_minutes' not in updated_data or updated_data['headway_minutes'] is None:
+            updated_data['headway_minutes'] = existing_stop.get('headway_minutes', getattr(route, 'headway_minutes', DEFAULT_SERVICE_CALENDAR["weekday"]["headway_minutes"]))
+        else:
+            try:
+                updated_data['headway_minutes'] = int(updated_data['headway_minutes'])
+            except (TypeError, ValueError):
+                raise ValueError("headway_minutes must be an integer")
 
         
         # Update with new data (preserve ID and timestamp)
