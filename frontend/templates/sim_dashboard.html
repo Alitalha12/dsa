@@ -502,15 +502,6 @@
         box-shadow: 0 8px 16px rgba(15, 23, 42, 0.2);
       }
 
-      .stop-tooltip {
-        background: rgba(15, 23, 42, 0.9);
-        color: #e2e8f0;
-        border: 1px solid rgba(148, 163, 184, 0.35);
-        border-radius: 10px;
-        padding: 6px 10px;
-        box-shadow: 0 10px 20px rgba(15, 23, 42, 0.35);
-      }
-
       .overlayTopRight {
         position: absolute;
         top: 12px;
@@ -895,6 +886,46 @@
           </div>
         </div>
       </div>
+      </div>
+    </div>
+
+    <!-- Add Stop Modal -->
+    <div id="addStopModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>➕ Add New Stop</h3>
+          <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <label for="stopName">Stop Name</label>
+          <input type="text" id="stopName" placeholder="Enter stop name" />
+          
+          <div class="row" style="margin-top: 10px">
+            <div>
+              <label for="stopLat">Latitude</label>
+              <input type="number" id="stopLat" step="0.000001" placeholder="31.5497" />
+            </div>
+            <div>
+              <label for="stopLng">Longitude</label>
+              <input type="number" id="stopLng" step="0.000001" placeholder="74.3436" />
+            </div>
+          </div>
+          
+          <div style="margin-top: 10px">
+            <label>
+              <input type="checkbox" id="autoConnectCheck" checked />
+              Auto-connect to nearest stops
+            </label>
+          </div>
+          
+          <div class="hint" style="margin-top: 10px">
+            💡 Click on map to set coordinates automatically
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn secondary" id="cancelAddStop">Cancel</button>
+          <button type="button" class="btn" id="confirmAddStop">Add Stop</button>
+        </div>
       </div>
     </div>
 
