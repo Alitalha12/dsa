@@ -427,7 +427,7 @@ function renderEdges() {
                 className: 'weight-label',
                 iconSize: [1, 1],
                 iconAnchor: [0, 0],
-                html: `<div>${distance.toFixed(2)} km</div>`
+                html: `<div style="background:rgba(2,6,23,0.85);padding:4px 8px;border-radius:8px;font-size:11px;font-weight:700;letter-spacing:0.2px;">${distance.toFixed(2)} km</div>`
             });
             
             const weightMarker = L.marker([midLat, midLng], {
