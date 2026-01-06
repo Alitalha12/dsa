@@ -14,6 +14,17 @@
         crossorigin=""
     >
     <style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Management - Smart Transport Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""
+    >
+    <style>
         :root {
             --sidebar-width: 250px;
         }
@@ -473,6 +484,62 @@
             margin-top: 6px;
         }
 
+        .map-picker {
+            height: 240px;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .map-hint {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 6px;
+        }
+
+        .map-picker {
+            height: 240px;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .map-hint {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 6px;
+        }
+
+        .map-picker {
+            height: 240px;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .map-hint {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 6px;
+        }
+
+        .map-picker {
+            height: 240px;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .map-hint {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 6px;
+        }
+
         .form-actions {
             display: flex;
             gap: 10px;
@@ -618,6 +685,27 @@
             <p>Administrator Panel</p>
         </div>
 
+        <div class="nav-links">
+            <a href="{{ url_for('admin_dashboard') }}" class="nav-item">
+                <i class="fas fa-tachometer-alt"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="#" class="nav-item">
+                <i class="fas fa-users"></i>
+                <span>Passengers</span>
+            </a>
+            <a href="{{ url_for('admin_bus_management') }}" class="nav-item">
+                <i class="fas fa-bus"></i>
+                <span>Bus Management</span>
+            </a>
+            <a href="{{ url_for('sim_dashboard') }}" class="nav-item">
+                <i class="fas fa-project-diagram"></i>
+                <span>Simulation</span>
+            </a>
+            <a href="{{ url_for('admin_routes') }}" class="nav-item active">
+                <i class="fas fa-route"></i>
+                <span>Routes</span>
+            </a>
         <div class="nav-links">
             <a href="{{ url_for('admin_dashboard') }}" class="nav-item">
                 <i class="fas fa-tachometer-alt"></i>
@@ -933,6 +1021,31 @@
                         <label class="form-label" for="distanceFromPrev">Distance from Previous Stop (km) *</label>
                         <input type="number" id="distanceFromPrev" class="form-control" value="0" min="0" step="0.1"
                             required>
+                    <div class="form-group">
+                        <label class="form-label" for="stopLocation">Location</label>
+                        <input type="text" id="stopLocation" class="form-control"
+                            placeholder="e.g., Near City Mall, Opposite Hospital">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Stop Coordinates *</label>
+                        <div class="form-hint">Click on the map to set latitude/longitude.</div>
+                        <div class="row" style="gap: 10px; margin-top: 10px;">
+                            <div style="flex: 1;">
+                                <input type="number" id="stopLat" class="form-control" placeholder="Latitude" step="0.000001" required>
+                            </div>
+                            <div style="flex: 1;">
+                                <input type="number" id="stopLng" class="form-control" placeholder="Longitude" step="0.000001" required>
+                            </div>
+                        </div>
+                        <div id="addStopMap" class="map-picker"></div>
+                        <div class="map-hint">Tip: click anywhere on the map to drop the stop marker.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="distanceFromPrev">Distance from Previous Stop (km) *</label>
+                        <input type="number" id="distanceFromPrev" class="form-control" value="0" min="0" step="0.1"
+                            required>
                         <div class="form-hint">If this is the first stop (position 1), keep it 0.</div>
                     </div>
 
@@ -1009,6 +1122,75 @@
                         <div class="map-hint">Tip: drag the marker to fine-tune coordinates.</div>
                     </div>
 
+                    <div class="form-group">
+                        <label class="form-label">Stop Coordinates *</label>
+                        <div class="form-hint">Search or click on the map to update latitude/longitude.</div>
+                        <div class="row" style="gap: 10px; margin-top: 10px;">
+                            <div style="flex: 1;">
+                                <input type="text" id="editStopSearch" class="form-control" placeholder="Search location (e.g., Liberty Market)">
+                            </div>
+                            <div>
+                                <button type="button" class="btn-secondary" id="editStopSearchBtn">Search</button>
+                            </div>
+                        </div>
+                        <div class="row" style="gap: 10px; margin-top: 10px;">
+                            <div style="flex: 1;">
+                                <input type="number" id="editStopLat" class="form-control" placeholder="Latitude" step="0.000001" required>
+                            </div>
+                            <div style="flex: 1;">
+                                <input type="number" id="editStopLng" class="form-control" placeholder="Longitude" step="0.000001" required>
+                            </div>
+                        </div>
+                        <div id="editStopMap" class="map-picker"></div>
+                        <div class="map-hint">Tip: drag the marker to fine-tune coordinates.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Stop Coordinates *</label>
+                        <div class="form-hint">Search or click on the map to update latitude/longitude.</div>
+                        <div class="row" style="gap: 10px; margin-top: 10px;">
+                            <div style="flex: 1;">
+                                <input type="text" id="editStopSearch" class="form-control" placeholder="Search location (e.g., Liberty Market)">
+                            </div>
+                            <div>
+                                <button type="button" class="btn-secondary" id="editStopSearchBtn">Search</button>
+                            </div>
+                        </div>
+                        <div class="row" style="gap: 10px; margin-top: 10px;">
+                            <div style="flex: 1;">
+                                <input type="number" id="editStopLat" class="form-control" placeholder="Latitude" step="0.000001" required>
+                            </div>
+                            <div style="flex: 1;">
+                                <input type="number" id="editStopLng" class="form-control" placeholder="Longitude" step="0.000001" required>
+                            </div>
+                        </div>
+                        <div id="editStopMap" class="map-picker"></div>
+                        <div class="map-hint">Tip: drag the marker to fine-tune coordinates.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Stop Coordinates *</label>
+                        <div class="form-hint">Search or click on the map to update latitude/longitude.</div>
+                        <div class="row" style="gap: 10px; margin-top: 10px;">
+                            <div style="flex: 1;">
+                                <input type="text" id="editStopSearch" class="form-control" placeholder="Search location (e.g., Liberty Market)">
+                            </div>
+                            <div>
+                                <button type="button" class="btn-secondary" id="editStopSearchBtn">Search</button>
+                            </div>
+                        </div>
+                        <div class="row" style="gap: 10px; margin-top: 10px;">
+                            <div style="flex: 1;">
+                                <input type="number" id="editStopLat" class="form-control" placeholder="Latitude" step="0.000001" required>
+                            </div>
+                            <div style="flex: 1;">
+                                <input type="number" id="editStopLng" class="form-control" placeholder="Longitude" step="0.000001" required>
+                            </div>
+                        </div>
+                        <div id="editStopMap" class="map-picker"></div>
+                        <div class="map-hint">Tip: drag the marker to fine-tune coordinates.</div>
+                    </div>
+
                     <div class="form-actions">
                         <button type="button" class="btn-secondary" onclick="closeModal('editStopModal')">
                             Cancel
@@ -1023,6 +1205,12 @@
         </div>
     </div>
 
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
+    <script>
     <script
         src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
@@ -1241,6 +1429,15 @@
             loadStats();
             setupAddStopMapInputs();
             setupEditStopMapInputs();
+
+            // Also setup event listeners for dynamically added elements
+            const observer = new MutationObserver(function (mutations) {
+        document.addEventListener('DOMContentLoaded', function () {
+            // Initial setup
+            setupEventListeners();
+            loadRoutes();
+            loadStats();
+            setupAddStopMapInputs();
 
             // Also setup event listeners for dynamically added elements
             const observer = new MutationObserver(function (mutations) {
@@ -1504,6 +1701,84 @@
         // Modal functions
         function showModal(modalId) {
             const modal = document.getElementById(modalId);
+            if (routesList) {
+                observer.observe(routesList, { childList: true, subtree: true });
+            }
+        });
+
+        const LAHORE_CENTER = [31.5204, 74.3587];
+        let addStopMap = null;
+        let addStopMarker = null;
+
+        function setupAddStopMapInputs() {
+            const latInput = document.getElementById('stopLat');
+            const lngInput = document.getElementById('stopLng');
+            if (!latInput || !lngInput) return;
+
+            const onInputChange = () => {
+                const lat = parseFloat(latInput.value);
+                const lng = parseFloat(lngInput.value);
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    updateAddStopMarker(lat, lng);
+                }
+            };
+
+            latInput.addEventListener('input', onInputChange);
+            lngInput.addEventListener('input', onInputChange);
+        }
+
+        function initAddStopMap() {
+            const mapEl = document.getElementById('addStopMap');
+            if (!mapEl) return;
+
+            if (!addStopMap) {
+                addStopMap = L.map(mapEl, {
+                    center: LAHORE_CENTER,
+                    zoom: 12,
+                    zoomControl: true
+                });
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19
+                }).addTo(addStopMap);
+
+                addStopMap.on('click', function (event) {
+                    const { lat, lng } = event.latlng;
+                    setAddStopCoordinates(lat, lng);
+                });
+            }
+
+            setTimeout(() => {
+                addStopMap.invalidateSize();
+            }, 200);
+        }
+
+        function setAddStopCoordinates(lat, lng) {
+            const latInput = document.getElementById('stopLat');
+            const lngInput = document.getElementById('stopLng');
+            if (latInput) latInput.value = lat.toFixed(6);
+            if (lngInput) lngInput.value = lng.toFixed(6);
+            updateAddStopMarker(lat, lng);
+        }
+
+        function updateAddStopMarker(lat, lng) {
+            if (!addStopMap) return;
+            if (!addStopMarker) {
+                addStopMarker = L.marker([lat, lng], { draggable: true }).addTo(addStopMap);
+                addStopMarker.on('dragend', function (event) {
+                    const pos = event.target.getLatLng();
+                    setAddStopCoordinates(pos.lat, pos.lng);
+                });
+            } else {
+                addStopMarker.setLatLng([lat, lng]);
+            }
+            addStopMap.panTo([lat, lng], { animate: true, duration: 0.4 });
+        }
+
+        // Modal functions
+        function showModal(modalId) {
+            const modal = document.getElementById(modalId);
             if (modal) {
                 modal.style.display = 'flex';
                 document.body.style.overflow = 'hidden';
@@ -1593,6 +1868,20 @@
                     console.error('Error loading route:', error);
                     showError('Failed to load route information: ' + error.message);
                 });
+                    showModal('addStopModal');
+                    initAddStopMap();
+                    const latInput = document.getElementById('stopLat');
+                    const lngInput = document.getElementById('stopLng');
+                    const lat = latInput && latInput.value ? parseFloat(latInput.value) : LAHORE_CENTER[0];
+                    const lng = lngInput && lngInput.value ? parseFloat(lngInput.value) : LAHORE_CENTER[1];
+                    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                        setAddStopCoordinates(lat, lng);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading route:', error);
+                    showError('Failed to load route information: ' + error.message);
+                });
         }
 
         // Show edit stop modal
@@ -1615,6 +1904,33 @@
                 .then(data => {
                     if (data.route && data.route.stops && Array.isArray(data.route.stops)) {
                         const stop = data.route.stops.find(s => s.position == position);
+                        if (stop) {
+                            const stopNameField = document.getElementById('editStopName');
+                            const waitTimeField = document.getElementById('editWaitTime');
+                            const locationField = document.getElementById('editStopLocation');
+                            const latField = document.getElementById('editStopLat');
+                            const lngField = document.getElementById('editStopLng');
+                            const searchField = document.getElementById('editStopSearch');
+
+                            if (stopNameField) stopNameField.value = stop.data && stop.data.stop_name ? stop.data.stop_name : '';
+                            if (waitTimeField) waitTimeField.value = stop.data && stop.data.wait_time ? stop.data.wait_time : 5;
+                            if (locationField) locationField.value = stop.data && stop.data.location ? stop.data.location : '';
+                            if (latField) latField.value = stop.data && stop.data.latitude ? stop.data.latitude : '';
+                            if (lngField) lngField.value = stop.data && stop.data.longitude ? stop.data.longitude : '';
+                            if (searchField && stopNameField && stopNameField.value) {
+                                searchField.value = stopNameField.value;
+                            }
+
+                            showModal('editStopModal');
+                            initEditStopMap();
+                            const lat = stop.data && stop.data.latitude ? parseFloat(stop.data.latitude) : LAHORE_CENTER[0];
+                            const lng = stop.data && stop.data.longitude ? parseFloat(stop.data.longitude) : LAHORE_CENTER[1];
+                            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                                setEditStopCoordinates(lat, lng);
+                            }
+                        } else {
+                            showError('Stop not found at position ' + position);
+                        }
                         if (stop) {
                             const stopNameField = document.getElementById('editStopName');
                             const waitTimeField = document.getElementById('editWaitTime');
@@ -1677,6 +1993,16 @@
             if (!submitBtn) {
                 showError('Submit button not found');
                 isCreatingRoute = false;
+                return;
+            }
+            if (!routeName) {
+                showError('Route name is required');
+                return;
+            }
+
+            const submitBtn = document.getElementById('createRouteSubmit');
+            if (!submitBtn) {
+                showError('Submit button not found');
                 return;
             }
 
@@ -1751,6 +2077,22 @@
             console.log('Position:', position);
             console.log('Latitude:', latitude);
             console.log('Longitude:', longitude);
+            const stopName = document.getElementById('stopName')?.value.trim();
+            const waitTime = parseInt(document.getElementById('waitTime')?.value);
+            const location = document.getElementById('stopLocation')?.value.trim();
+            const distanceFromPrev = parseFloat(document.getElementById('distanceFromPrev')?.value);
+            const latitude = parseFloat(document.getElementById('stopLat')?.value);
+            const longitude = parseFloat(document.getElementById('stopLng')?.value);
+
+            const position = document.getElementById('position')?.value;
+
+            console.log('Route ID:', routeId);
+            console.log('Stop Name:', stopName);
+            console.log('Wait Time:', waitTime);
+            console.log('Location:', location);
+            console.log('Position:', position);
+            console.log('Latitude:', latitude);
+            console.log('Longitude:', longitude);
 
             if (!routeId) {
                 showError('Route ID is missing');
@@ -1786,6 +2128,22 @@
             if (!submitBtn) {
                 showError('Submit button not found');
                 isAddingStop = false;
+            if (isNaN(distanceFromPrev) || distanceFromPrev < 0) {
+                showError('Distance must be 0 or a positive number');
+                isAddingStop = false;
+                return;
+            }
+
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                showError('Please select a location on the map to set latitude and longitude');
+                isAddingStop = false;
+                return;
+            }
+
+            const submitBtn = document.getElementById('addStopSubmit');
+            if (!submitBtn) {
+                showError('Submit button not found');
+                isAddingStop = false;
                 return;
             }
 
@@ -1794,6 +2152,14 @@
             submitBtn.disabled = true;
 
             try {
+                const stopData = {
+                    stop_name: stopName,
+                    wait_time: waitTime,
+                    location: location || '',
+                    latitude: latitude,
+                    longitude: longitude,
+                    distance_from_previous: distanceFromPrev
+                };
                 const stopData = {
                     stop_name: stopName,
                     wait_time: waitTime,
@@ -1857,6 +2223,15 @@
             const longitude = parseFloat(document.getElementById('editStopLng')?.value);
 
             console.log('Edit params:', { routeId, position, stopName, waitTime, location, latitude, longitude });
+            const routeId = document.getElementById('editStopRouteId')?.value;
+            const position = document.getElementById('editStopPosition')?.value;
+            const stopName = document.getElementById('editStopName')?.value.trim();
+            const waitTime = parseInt(document.getElementById('editWaitTime')?.value);
+            const location = document.getElementById('editStopLocation')?.value.trim();
+            const latitude = parseFloat(document.getElementById('editStopLat')?.value);
+            const longitude = parseFloat(document.getElementById('editStopLng')?.value);
+
+            console.log('Edit params:', { routeId, position, stopName, waitTime, location, latitude, longitude });
 
             if (!routeId || !position) {
                 showError('Route ID or position is missing');
@@ -1868,6 +2243,20 @@
                 return;
             }
 
+            if (isNaN(waitTime) || waitTime < 1 || waitTime > 30) {
+                showError('Wait time must be between 1 and 30 minutes');
+                return;
+            }
+
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                showError('Please select a location on the map to set latitude and longitude');
+                return;
+            }
+
+            const submitBtn = document.getElementById('editStopSubmit');
+            if (!submitBtn) {
+                showError('Submit button not found');
+                return;
             if (isNaN(waitTime) || waitTime < 1 || waitTime > 30) {
                 showError('Wait time must be between 1 and 30 minutes');
                 return;
@@ -1894,6 +2283,14 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
+                    body: JSON.stringify({
+                        stop_name: stopName,
+                        wait_time: waitTime,
+                        location: location || '',
+                        latitude: latitude,
+                        longitude: longitude
+                    })
+                });
                     body: JSON.stringify({
                         stop_name: stopName,
                         wait_time: waitTime,
@@ -2176,4 +2573,5 @@
     </script>
 </body>
 
+</html>
 </html>

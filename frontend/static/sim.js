@@ -461,6 +461,28 @@ function computePathDistance(pathStops) {
     return distance;
 }
 
+function computePathDistance(pathStops) {
+    if (!Array.isArray(pathStops) || pathStops.length < 2) return 0;
+    let distance = 0;
+    for (let i = 0; i < pathStops.length - 1; i++) {
+        const from = pathStops[i];
+        const to = pathStops[i + 1];
+        const edge = GRAPH.edges.find(e =>
+            (e.from === from && e.to === to) || (e.from === to && e.to === from)
+        );
+        if (edge && typeof edge.w === 'number') {
+            distance += edge.w;
+        } else {
+            const fromCoord = coords.get(from);
+            const toCoord = coords.get(to);
+            if (fromCoord && toCoord) {
+                distance += calculateDistance(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng);
+            }
+        }
+    }
+    return distance;
+}
+
 // ===================== DATA LOADING =====================
 async function fetchJSON(url, options = {}) {
     try {
@@ -712,60 +734,6 @@ function buildEdgesFromRoutes(routesData) {
     });
 
     return edges;
-}
-
-function createStableTestData() {
-    console.log('Creating stable test data...');
-    
-    GRAPH.nodes = ["Bus Stop 1", "Bus Stop 2", "Bus Stop 3", "Bus Stop 4"];
-    
-    const centerLat = 31.5204;
-    const centerLng = 74.3587;
-    const radius = 0.003;
-    
-    GRAPH.nodes.forEach((stopName, index) => {
-        const angle = (index * 2 * Math.PI) / GRAPH.nodes.length;
-        const lat = centerLat + Math.cos(angle) * radius;
-        const lng = centerLng + Math.sin(angle) * radius;
-        
-        coords.set(stopName, { lat, lng });
-        coordsBase.set(stopName, { lat, lng });
-    });
-    
-    GRAPH.edges = [
-        { from: "Bus Stop 1", to: "Bus Stop 2", w: 0.5 },
-        { from: "Bus Stop 2", to: "Bus Stop 3", w: 0.5 },
-        { from: "Bus Stop 3", to: "Bus Stop 4", w: 0.5 },
-        { from: "Bus Stop 4", to: "Bus Stop 1", w: 0.5 }
-    ];
-    
-    netPill.textContent = `Network: ${GRAPH.nodes.length} stops · ${GRAPH.edges.length} routes (Test)`;
-    populateDropdowns();
-    renderStops();
-    renderEdges();
-    setTimeout(fitBoundsToStops, 100);
-}
-
-function populateDropdowns() {
-    startSelect.innerHTML = '<option value="">Select start</option>';
-    endSelect.innerHTML = '<option value="">Select destination</option>';
-    
-    GRAPH.nodes.forEach(stopName => {
-        const startOption = document.createElement('option');
-        startOption.value = stopName;
-        startOption.textContent = stopName;
-        startSelect.appendChild(startOption);
-        
-        const endOption = document.createElement('option');
-        endOption.value = stopName;
-        endOption.textContent = stopName;
-        endSelect.appendChild(endOption);
-    });
-    
-    if (GRAPH.nodes.length >= 2) {
-        startSelect.value = GRAPH.nodes[0];
-        endSelect.value = GRAPH.nodes[1];
-    }
 }
 
 // ===================== ROUTE COMPUTATION =====================
@@ -1367,6 +1335,8 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM loaded, starting simulation...');
     setTimeout(initializeSimulation, 100);
 });
+
+window.initSimulation = initializeSimulation;
 
 window.initSimulation = initializeSimulation;
 
