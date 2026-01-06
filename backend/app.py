@@ -892,6 +892,15 @@ def api_sim_routes():
             "route_id": rid,
             "route_name": r.get("route_name"),
             "stops": stops,
+            "stop_details": [
+                {
+                    "stop_name": (s.get("stop_name") or "").strip(),
+                    "latitude": _to_float(s.get("latitude")),
+                    "longitude": _to_float(s.get("longitude")),
+                    "distance_from_previous": _safe_distance(s.get("distance_from_previous"), 1.0),
+                }
+                for s in stop_dicts
+            ],
             "distances": _distances_from_stop_dicts(stop_dicts),
         })
 
