@@ -14,8 +14,6 @@ DEFAULT_SERVICE_CALENDAR = {
     "weekend": {"start_time": "08:00", "end_time": "20:00", "headway_minutes": 20},
 }
 
-DEFAULT_ARRIVAL_RATE = 2.0
-
 def _normalize_time(value):
     """Normalize time to HH:MM format or return None."""
     if value in (None, ""):
@@ -40,17 +38,6 @@ def _merge_service_calendar(calendar):
         if isinstance(calendar, dict) and isinstance(calendar.get(key), dict):
             merged[key].update(calendar[key])
     return merged
-
-def _normalize_arrival_rate(value):
-    if value is None:
-        return DEFAULT_ARRIVAL_RATE
-    try:
-        rate = float(value)
-    except (TypeError, ValueError):
-        raise ValueError("arrival_rate must be a number")
-    if rate < 0:
-        raise ValueError("arrival_rate must be 0 or a positive number")
-    return rate
 
 class RouteManager:
     """Manages bus routes using Linked List data structure"""
@@ -151,7 +138,6 @@ class RouteManager:
                     stop_data['arrival_time'] = _safe_normalize_time(stop_data.get('arrival_time')) if 'arrival_time' in stop_data else None
                     stop_data['departure_time'] = _safe_normalize_time(stop_data.get('departure_time')) if 'departure_time' in stop_data else None
                     stop_data.setdefault('headway_minutes', route.headway_minutes)
-                    stop_data['arrival_rate'] = _normalize_arrival_rate(stop_data.get('arrival_rate', DEFAULT_ARRIVAL_RATE))
                     route.add_last(stop_data)
         else:
             # If route_data is already a LinkedList or unexpected type
@@ -328,7 +314,6 @@ class RouteManager:
                     stop_data['headway_minutes'] = int(stop_data['headway_minutes'])
                 except (TypeError, ValueError):
                     raise ValueError("headway_minutes must be an integer")
-            stop_data['arrival_rate'] = _normalize_arrival_rate(stop_data.get('arrival_rate', DEFAULT_ARRIVAL_RATE))
 
             
             stop_data['added_at'] = datetime.now().isoformat()
@@ -401,10 +386,6 @@ class RouteManager:
                 updated_data['headway_minutes'] = int(updated_data['headway_minutes'])
             except (TypeError, ValueError):
                 raise ValueError("headway_minutes must be an integer")
-        if 'arrival_rate' not in updated_data:
-            updated_data['arrival_rate'] = existing_stop.get('arrival_rate', DEFAULT_ARRIVAL_RATE)
-        else:
-            updated_data['arrival_rate'] = _normalize_arrival_rate(updated_data.get('arrival_rate'))
 
         
         # Update with new data (preserve ID and timestamp)
