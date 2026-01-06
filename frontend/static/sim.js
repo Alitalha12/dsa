@@ -31,6 +31,9 @@ let tileLayer;
 let satelliteLayer;
 let currentTileLayer;
 
+const LAHORE_CENTER = [31.5204, 74.3587];
+const LAHORE_BOUNDS = L.latLngBounds([31.30, 74.10], [31.70, 74.55]);
+
 // Simulation state
 let ROUTES = [];
 let GRAPH = { nodes: [], edges: [] };
@@ -39,6 +42,10 @@ let coords = new Map();
 let stopMarkers = new Map();
 let edgeLines = new Map();
 let weightMarkers = new Map();
+let hasInitialized = false;
+let edgeLayer = null;
+let weightLayer = null;
+let busTrail = null;
 
 // Dijkstra state
 let settledOrder = [];
@@ -53,17 +60,13 @@ let busMarker = null;
 let busAnimationInterval = null;
 
 // DOM Elements
-let startSelect, endSelect, computeBtn, stopBtn, pauseBtn, playBtn, swapBtn, addStopBtn;
+let startSelect, endSelect, computeBtn, stopBtn, pauseBtn, playBtn, swapBtn;
 let simMsg, searchStop;
 let tGrid, tWeights, tLabels, tExplored, tSatellite, tAutoConnect;
 let resetLayoutBtn, saveLayoutBtn, autoConnectBtn, clearRouteBtn;
 let kpiDistance, kpiStops, kpiConnections, kpiStatus, netPill, routePill, stopCount;
 let speedSlider, speedValue;
 let zoomInBtn, zoomOutBtn, fitBoundsBtn, zoomLevel;
-
-// Modal elements
-let addStopModal, stopNameInput, stopLatInput, stopLngInput, autoConnectCheck;
-let confirmAddStop, cancelAddStop, closeModal;
 
 // ===================== INITIALIZATION =====================
 function initializeDOMReferences() {
@@ -77,7 +80,6 @@ function initializeDOMReferences() {
     pauseBtn = document.getElementById("pauseBtn");
     playBtn = document.getElementById("playBtn");
     swapBtn = document.getElementById("swapBtn");
-    addStopBtn = document.getElementById("addStopBtn");
     simMsg = document.getElementById("simMsg");
     searchStop = document.getElementById("searchStop");
     
@@ -114,16 +116,6 @@ function initializeDOMReferences() {
     fitBoundsBtn = document.getElementById("fitBoundsBtn");
     zoomLevel = document.getElementById("zoomLevel");
     
-    // Modal elements
-    addStopModal = document.getElementById("addStopModal");
-    stopNameInput = document.getElementById("stopName");
-    stopLatInput = document.getElementById("stopLat");
-    stopLngInput = document.getElementById("stopLng");
-    autoConnectCheck = document.getElementById("autoConnectCheck");
-    confirmAddStop = document.getElementById("confirmAddStop");
-    cancelAddStop = document.getElementById("cancelAddStop");
-    closeModal = document.querySelector(".close-modal");
-    
     console.log('DOM references initialized');
 }
 
@@ -143,7 +135,7 @@ function setKpis({ distance, stops, connections, status }) {
 // ===================== LEAFLET MAP SETUP =====================
 function initMap() {
     console.log('Initializing Leaflet map...');
-    
+
     const mapElement = document.getElementById('map');
     if (!mapElement) {
         console.error('Map container not found!');
@@ -151,14 +143,16 @@ function initMap() {
     }
     
     map = L.map('map', {
-        center: [31.5204, 74.3587],
-        zoom: 13,
+        center: LAHORE_CENTER,
+        zoom: 12,
         zoomControl: true,
         preferCanvas: true,
         maxZoom: 18,
-        minZoom: 10
+        minZoom: 10,
+        maxBounds: LAHORE_BOUNDS,
+        maxBoundsViscosity: 0.9
     });
-    
+
     tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
         maxZoom: 19,
@@ -170,10 +164,15 @@ function initMap() {
         maxZoom: 19,
         minZoom: 10
     });
-    
+
     currentTileLayer = tileLayer;
     tileLayer.addTo(map);
-    
+
+    map.fitBounds(LAHORE_BOUNDS.pad(0.08));
+
+    edgeLayer = L.layerGroup().addTo(map);
+    weightLayer = L.layerGroup().addTo(map);
+
     map.on('zoom', function() {
         zoomLevel.textContent = map.getZoom();
     });
@@ -184,8 +183,20 @@ function initMap() {
 // ===================== STOP MANAGEMENT =====================
 function createStopIcon(type = 'normal') {
     const className = `stop-icon ${type}`;
-    const size = type === 'start' || type === 'end' ? 45 : 40;
-    const emoji = type === 'start' ? '📍' : type === 'end' ? '🎯' : '🏢';
+    const size = type === 'start' || type === 'end' ? 56 : 48;
+    const buildingSvg = `
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 20V7.5L12 4l8 3.5V20" stroke="white" stroke-width="1.6" fill="rgba(255,255,255,0.15)"/>
+            <rect x="7" y="9" width="2" height="2" fill="white"/>
+            <rect x="11" y="9" width="2" height="2" fill="white"/>
+            <rect x="15" y="9" width="2" height="2" fill="white"/>
+            <rect x="7" y="13" width="2" height="2" fill="white"/>
+            <rect x="11" y="13" width="2" height="2" fill="white"/>
+            <rect x="15" y="13" width="2" height="2" fill="white"/>
+            <rect x="10" y="17" width="4" height="3" fill="white"/>
+        </svg>
+    `;
+    const emoji = type === 'start' ? '📍' : type === 'end' ? '🎯' : buildingSvg;
     
     return L.divIcon({
         className: className,
@@ -198,7 +209,7 @@ function createStopIcon(type = 'normal') {
                 display:flex;
                 align-items:center;
                 justify-content:center;
-                font-size:${type === 'start' || type === 'end' ? '18px' : '16px'};
+                font-size:${type === 'start' || type === 'end' ? '20px' : '16px'};
             ">
                 ${emoji}
             </div>
@@ -209,9 +220,9 @@ function createStopIcon(type = 'normal') {
 function createBusIcon() {
     return L.divIcon({
         className: 'bus-icon',
-        iconSize: [45, 45],
-        iconAnchor: [22.5, 22.5],
-        html: '<div style="width:45px;height:45px;display:flex;align-items:center;justify-content:center;font-size:22px">🚌</div>'
+        iconSize: [62, 62],
+        iconAnchor: [31, 31],
+        html: '<div style="width:62px;height:62px;display:flex;align-items:center;justify-content:center;font-size:28px">🚌</div>'
     });
 }
 
@@ -321,14 +332,19 @@ function updateStopIcons() {
 function renderEdges() {
     console.log('Rendering edges...');
     
-    edgeLines.forEach(line => {
-        if (line && line.remove) line.remove();
+    edgeLines.forEach(lines => {
+        if (Array.isArray(lines)) {
+            lines.forEach(line => line && line.remove && line.remove());
+        } else if (lines && lines.remove) {
+            lines.remove();
+        }
     });
-    weightMarkers.forEach(marker => {
-        if (marker && marker.remove) marker.remove();
-    });
+    weightMarkers.forEach(marker => marker && marker.remove && marker.remove());
     edgeLines.clear();
     weightMarkers.clear();
+
+    if (edgeLayer) edgeLayer.clearLayers();
+    if (weightLayer) weightLayer.clearLayers();
     
     if (!tGrid.checked || !GRAPH.edges || GRAPH.edges.length === 0) {
         console.log('Edges disabled or no edges to render');
@@ -357,20 +373,36 @@ function renderEdges() {
                    (stop === edge.to && path[index + 1] === edge.from);
         });
         
-        const distance = calculateDistance(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng);
+        const distance = typeof edge.w === 'number' ? edge.w : calculateDistance(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng);
         
+        const lineBase = L.polyline([
+            [fromCoord.lat, fromCoord.lng],
+            [toCoord.lat, toCoord.lng]
+        ], {
+            color: isPathEdge ? '#0f766e' : '#0f172a',
+            weight: isPathEdge ? 18 : 14,
+            opacity: isPathEdge ? 0.5 : 0.55,
+            lineCap: 'round',
+            lineJoin: 'round',
+            className: `${isPathEdge ? 'road-line path casing' : 'road-line casing'}`
+        });
+
         const line = L.polyline([
             [fromCoord.lat, fromCoord.lng],
             [toCoord.lat, toCoord.lng]
         ], {
-            color: isPathEdge ? '#10b981' : '#3b82f6',
-            weight: isPathEdge ? 8 : 5,
-            opacity: isPathEdge ? 0.95 : 0.8,
+            color: isPathEdge ? '#10b981' : '#2563eb',
+            weight: isPathEdge ? 12 : 9,
+            opacity: isPathEdge ? 0.95 : 0.85,
             lineCap: 'round',
-            lineJoin: 'round'
-        }).addTo(map);
-        
-        edgeLines.set(`${edge.from}-${edge.to}`, line);
+            lineJoin: 'round',
+            className: `${isPathEdge ? 'road-line path glow' : 'road-line glow'}`
+        });
+
+        lineBase.addTo(edgeLayer);
+        line.addTo(edgeLayer);
+
+        edgeLines.set(`${edge.from}-${edge.to}`, [lineBase, line]);
         
         if (tWeights.checked) {
             const midLat = (fromCoord.lat + toCoord.lat) / 2;
@@ -380,13 +412,13 @@ function renderEdges() {
                 className: 'weight-label',
                 iconSize: [1, 1],
                 iconAnchor: [0, 0],
-                html: `<div style="background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:4px;font-size:10px;">${distance.toFixed(1)} km</div>`
+                html: `<div>${distance.toFixed(2)} km</div>`
             });
             
             const weightMarker = L.marker([midLat, midLng], {
                 icon: weightDiv,
                 interactive: false
-            }).addTo(map);
+            }).addTo(weightLayer);
             
             weightMarkers.set(`${edge.from}-${edge.to}`, weightMarker);
         }
@@ -405,6 +437,28 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
         Math.sin(dLng/2) * Math.sin(dLng/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c;
+}
+
+function computePathDistance(pathStops) {
+    if (!Array.isArray(pathStops) || pathStops.length < 2) return 0;
+    let distance = 0;
+    for (let i = 0; i < pathStops.length - 1; i++) {
+        const from = pathStops[i];
+        const to = pathStops[i + 1];
+        const edge = GRAPH.edges.find(e =>
+            (e.from === from && e.to === to) || (e.from === to && e.to === from)
+        );
+        if (edge && typeof edge.w === 'number') {
+            distance += edge.w;
+        } else {
+            const fromCoord = coords.get(from);
+            const toCoord = coords.get(to);
+            if (fromCoord && toCoord) {
+                distance += calculateDistance(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng);
+            }
+        }
+    }
+    return distance;
 }
 
 // ===================== DATA LOADING =====================
@@ -484,57 +538,69 @@ async function processData(routesData, graphData) {
     coordsBase.clear();
     coords.clear();
     
+    const nodesFromRoutes = extractNodesFromRoutes();
+    const graphNodeNames = graphData.nodes && graphData.nodes.length > 0
+        ? extractNodeNames(graphData.nodes)
+        : [];
+
     if (graphData.nodes && graphData.nodes.length > 0) {
-        console.log('Using nodes from graph data');
+        console.log('Using node coordinates from graph data');
         processGraphNodes(graphData.nodes);
-    } 
-    else if (ROUTES.length > 0) {
-        console.log('Extracting nodes from routes');
-        extractNodesFromRoutes();
     }
-    
-    if (graphData.edges && graphData.edges.length > 0) {
-        console.log('Using edges from graph data');
+
+    if (nodesFromRoutes.length > 0) {
+        GRAPH.nodes = nodesFromRoutes;
+    } else {
+        GRAPH.nodes = graphNodeNames;
+    }
+
+    ensureNodeCoordinates(GRAPH.nodes);
+
+    GRAPH.edges = buildEdgesFromRoutes(routesData);
+    if (GRAPH.edges.length === 0 && graphData.edges && graphData.edges.length > 0) {
+        console.log('Fallback to graph edges');
         processGraphEdges(graphData.edges);
     }
-    else if (ROUTES.length > 0) {
-        console.log('Creating edges from routes');
-        createStableEdgesFromRoutes();
-    }
-    
-    ensureStableCoordinates();
     
     console.log('Final graph:', GRAPH);
     console.log('Final coordinates:', coords);
 }
 
 function processGraphNodes(nodes) {
-    const centerLat = 31.5204;
-    const centerLng = 74.3587;
-    const radius = 0.01;
-    
     nodes.forEach((node, index) => {
         let nodeName;
+        let lat = null;
+        let lng = null;
         
         if (typeof node === 'string') {
             nodeName = node.trim();
         } else if (typeof node === 'object') {
             nodeName = (node.name || node.id || `Stop_${index + 1}`).toString().trim();
+            lat = typeof node.lat === 'number' ? node.lat : null;
+            lng = typeof node.lng === 'number' ? node.lng : null;
         }
         
-        if (!nodeName || GRAPH.nodes.includes(nodeName)) return;
-        
-        GRAPH.nodes.push(nodeName);
-        
-        const angle = (index * 2 * Math.PI) / nodes.length;
-        const distance = radius * (0.5 + Math.random() * 0.5);
-        
-        const lat = centerLat + Math.cos(angle) * distance;
-        const lng = centerLng + Math.sin(angle) * distance;
-        
-        coords.set(nodeName, { lat, lng });
-        coordsBase.set(nodeName, { lat, lng });
+        if (!nodeName) return;
+
+        if (lat !== null && lng !== null) {
+            coords.set(nodeName, { lat, lng });
+            coordsBase.set(nodeName, { lat, lng });
+        }
     });
+}
+
+function extractNodeNames(nodes) {
+    const names = [];
+    nodes.forEach((node, index) => {
+        if (typeof node === 'string') {
+            const name = node.trim();
+            if (name) names.push(name);
+        } else if (typeof node === 'object' && node !== null) {
+            const name = (node.name || node.id || `Stop_${index + 1}`).toString().trim();
+            if (name) names.push(name);
+        }
+    });
+    return names;
 }
 
 function extractNodesFromRoutes() {
@@ -550,8 +616,27 @@ function extractNodesFromRoutes() {
         }
     });
     
-    GRAPH.nodes = Array.from(nodeSet);
-    console.log('Extracted nodes:', GRAPH.nodes);
+    const nodes = Array.from(nodeSet);
+    console.log('Extracted nodes:', nodes);
+    return nodes;
+}
+
+function ensureNodeCoordinates(nodeNames) {
+    if (!Array.isArray(nodeNames) || nodeNames.length === 0) return;
+
+    const centerLat = LAHORE_CENTER[0];
+    const centerLng = LAHORE_CENTER[1];
+    const radius = 0.02;
+
+    const missing = nodeNames.filter((name) => !coords.has(name));
+    missing.forEach((name, index) => {
+        const angle = (index * 2 * Math.PI) / missing.length;
+        const jitter = 0.3 + Math.random() * 0.4;
+        const lat = centerLat + Math.cos(angle) * radius * jitter;
+        const lng = centerLng + Math.sin(angle) * radius * jitter;
+        coords.set(name, { lat, lng });
+        coordsBase.set(name, { lat, lng });
+    });
 }
 
 function processGraphEdges(edges) {
@@ -570,10 +655,12 @@ function processGraphEdges(edges) {
                 const toCoord = coords.get(edge.to);
                 
                 if (fromCoord && toCoord) {
-                    const distance = calculateDistance(
-                        fromCoord.lat, fromCoord.lng,
-                        toCoord.lat, toCoord.lng
-                    );
+                    const distance = typeof edge.w === 'number'
+                        ? edge.w
+                        : calculateDistance(
+                            fromCoord.lat, fromCoord.lng,
+                            toCoord.lat, toCoord.lng
+                        );
                     
                     GRAPH.edges.push({
                         from: edge.from,
@@ -628,25 +715,42 @@ function createStableEdgesFromRoutes() {
     });
 }
 
-function ensureStableCoordinates() {
-    const centerLat = 31.5204;
-    const centerLng = 74.3587;
-    const baseRadius = 0.005;
-    
-    GRAPH.nodes.forEach((nodeName, index) => {
-        if (!coords.has(nodeName) || !coords.get(nodeName)) {
-            const angle = (index * 2 * Math.PI) / GRAPH.nodes.length;
-            const distance = baseRadius * (0.3 + Math.random() * 0.7);
-            
-            const lat = centerLat + Math.cos(angle) * distance;
-            const lng = centerLng + Math.sin(angle) * distance;
-            
-            coords.set(nodeName, { lat, lng });
-            if (!coordsBase.has(nodeName)) {
-                coordsBase.set(nodeName, { lat, lng });
+function buildEdgesFromRoutes(routesData) {
+    const edges = [];
+    const edgeSet = new Set();
+    const routes = routesData?.routes || [];
+
+    routes.forEach((route) => {
+        const stops = Array.isArray(route.stops) ? route.stops : [];
+        const distances = Array.isArray(route.distances) ? route.distances : [];
+
+        for (let i = 0; i < stops.length - 1; i++) {
+            const fromStop = stops[i]?.toString().trim();
+            const toStop = stops[i + 1]?.toString().trim();
+            if (!fromStop || !toStop) continue;
+            if (!GRAPH.nodes.includes(fromStop) || !GRAPH.nodes.includes(toStop)) continue;
+
+            const edgeKey = `${fromStop}-${toStop}`;
+            const reverseKey = `${toStop}-${fromStop}`;
+            if (edgeSet.has(edgeKey) || edgeSet.has(reverseKey)) continue;
+
+            let distance = distances[i];
+            if (typeof distance !== 'number' || Number.isNaN(distance)) {
+                const fromCoord = coords.get(fromStop);
+                const toCoord = coords.get(toStop);
+                if (fromCoord && toCoord) {
+                    distance = calculateDistance(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng);
+                } else {
+                    distance = 1;
+                }
             }
+
+            edges.push({ from: fromStop, to: toStop, w: distance });
+            edgeSet.add(edgeKey);
         }
     });
+
+    return edges;
 }
 
 function createStableTestData() {
@@ -748,6 +852,10 @@ async function computeRoute() {
             return;
         }
         
+        if (totalDistance == null) {
+            totalDistance = computePathDistance(path);
+        }
+
         routePill.textContent = `Path: ${path[0]} → ${path[path.length - 1]}`;
         setMsg(simMsg, `Found path: ${path.join(' → ')} | Distance: ${totalDistance?.toFixed(2)} km`);
         
@@ -836,6 +944,10 @@ function computeClientSideRoute(start, end) {
     }
     
     if (path.length > 0) {
+        if (totalDistance === Infinity) {
+            totalDistance = computePathDistance(path);
+        }
+
         routePill.textContent = `Path: ${path[0]} → ${path[path.length - 1]}`;
         setMsg(simMsg, `Found path: ${path.join(' → ')} | Distance: ${totalDistance?.toFixed(2) || 0} km`);
         
@@ -862,13 +974,18 @@ function computeClientSideRoute(start, end) {
 
 function animateBusAlongPath() {
     if (busAnimationInterval) {
-        clearInterval(busAnimationInterval);
+        cancelAnimationFrame(busAnimationInterval);
         busAnimationInterval = null;
     }
     
     if (busMarker) {
         busMarker.remove();
         busMarker = null;
+    }
+
+    if (busTrail) {
+        busTrail.remove();
+        busTrail = null;
     }
     
     if (path.length < 2) return;
@@ -879,16 +996,29 @@ function animateBusAlongPath() {
     busMarker = L.marker([startCoord.lat, startCoord.lng], {
         icon: createBusIcon()
     }).addTo(map);
+
+    busTrail = L.polyline([[startCoord.lat, startCoord.lng]], {
+        color: '#f59e0b',
+        weight: 6,
+        opacity: 0.6,
+        lineCap: 'round',
+        lineJoin: 'round',
+        dashArray: '8 12'
+    }).addTo(map);
     
     const speed = parseFloat(speedSlider.value) || 1;
     let currentSegment = 0;
     let progress = 0;
-    
-    busAnimationInterval = setInterval(() => {
-        if (isPaused) return;
+    let lastTimestamp = null;
+
+    const step = (timestamp) => {
+        if (isPaused) {
+            busAnimationInterval = requestAnimationFrame(step);
+            return;
+        }
         
         if (currentSegment >= path.length - 1) {
-            clearInterval(busAnimationInterval);
+            cancelAnimationFrame(busAnimationInterval);
             busAnimationInterval = null;
             setMsg(simMsg, `Bus reached destination: ${path[path.length - 1]}`);
             setKpis({
@@ -899,6 +1029,10 @@ function animateBusAlongPath() {
             });
             return;
         }
+
+        if (!lastTimestamp) lastTimestamp = timestamp;
+        const delta = timestamp - lastTimestamp;
+        lastTimestamp = timestamp;
         
         const fromStop = path[currentSegment];
         const toStop = path[currentSegment + 1];
@@ -911,10 +1045,11 @@ function animateBusAlongPath() {
             return;
         }
         
-        progress += 0.02 * speed;
+        progress += (delta / 2000) * speed;
         if (progress >= 1) {
             progress = 0;
             currentSegment++;
+            busAnimationInterval = requestAnimationFrame(step);
             return;
         }
         
@@ -922,22 +1057,37 @@ function animateBusAlongPath() {
         const currentLng = fromCoord.lng + (toCoord.lng - fromCoord.lng) * progress;
         
         busMarker.setLatLng([currentLat, currentLng]);
+
+        if (busTrail) {
+            const trail = busTrail.getLatLngs();
+            trail.push([currentLat, currentLng]);
+            if (trail.length > 200) trail.shift();
+            busTrail.setLatLngs(trail);
+        }
         
         const overallProgress = ((currentSegment + progress) / (path.length - 1)) * 100;
         setMsg(simMsg, `Bus: ${fromStop} → ${toStop} (${overallProgress.toFixed(0)}%)`);
         
-    }, 50);
+        busAnimationInterval = requestAnimationFrame(step);
+    };
+
+    busAnimationInterval = requestAnimationFrame(step);
 }
 
 function clearRoute() {
     if (busAnimationInterval) {
-        clearInterval(busAnimationInterval);
+        cancelAnimationFrame(busAnimationInterval);
         busAnimationInterval = null;
     }
     
     if (busMarker) {
         busMarker.remove();
         busMarker = null;
+    }
+
+    if (busTrail) {
+        busTrail.remove();
+        busTrail = null;
     }
     
     path = [];
@@ -1042,7 +1192,8 @@ function setupEventListeners() {
     // Search functionality
     searchStop.addEventListener('input', function() {
         const query = this.value.toLowerCase().trim();
-        
+        let firstMatch = null;
+
         if (!query) {
             stopMarkers.forEach(marker => {
                 if (marker) {
@@ -1060,6 +1211,7 @@ function setupEventListeners() {
             if (!marker) return;
             
             if (stopName.toLowerCase().includes(query)) {
+                if (!firstMatch) firstMatch = stopName;
                 marker.setOpacity(1);
                 marker.bringToFront();
                 
@@ -1075,6 +1227,30 @@ function setupEventListeners() {
                 }
             }
         });
+
+        if (firstMatch) {
+            const coord = coords.get(firstMatch);
+            if (coord) {
+                map.setView([coord.lat, coord.lng], Math.max(map.getZoom(), 14), { animate: true });
+            }
+        }
+    });
+
+    searchStop.addEventListener('keydown', function(event) {
+        if (event.key !== 'Enter') return;
+        const query = this.value.toLowerCase().trim();
+        if (!query) return;
+        const match = GRAPH.nodes.find((name) => name.toLowerCase().includes(query));
+        if (match) {
+            if (!startSelect.value) {
+                startSelect.value = match;
+            } else if (!endSelect.value) {
+                endSelect.value = match;
+            } else {
+                endSelect.value = match;
+            }
+            updateStopIcons();
+        }
     });
     
     // Map zoom controls
@@ -1140,7 +1316,7 @@ function setupEventListeners() {
                     toCoord.lat, toCoord.lng
                 );
                 
-                if (distance < 0.5) {
+                if (distance < 0.8) {
                     newEdges.push({
                         from: fromStop,
                         to: toStop,
@@ -1167,103 +1343,11 @@ function setupEventListeners() {
         });
     });
     
-    // Add stop modal
-    addStopBtn.addEventListener('click', function() {
-        const center = map.getCenter();
-        stopLatInput.value = center.lat.toFixed(6);
-        stopLngInput.value = center.lng.toFixed(6);
-        stopNameInput.value = "";
-        addStopModal.style.display = "flex";
-        stopNameInput.focus();
-    });
-    
-    closeModal.addEventListener('click', function() {
-        addStopModal.style.display = "none";
-    });
-    
-    cancelAddStop.addEventListener('click', function() {
-        addStopModal.style.display = "none";
-    });
-    
-    confirmAddStop.addEventListener('click', function() {
-        const name = stopNameInput.value.trim();
-        const lat = parseFloat(stopLatInput.value);
-        const lng = parseFloat(stopLngInput.value);
-        
-        if (!name) {
-            alert("Please enter a stop name");
-            return;
-        }
-        
-        if (GRAPH.nodes.includes(name)) {
-            alert(`Stop "${name}" already exists!`);
-            return;
-        }
-        
-        if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-            alert("Please enter valid coordinates (lat: -90 to 90, lng: -180 to 180)");
-            return;
-        }
-        
-        GRAPH.nodes.push(name);
-        coords.set(name, { lat, lng });
-        coordsBase.set(name, { lat, lng });
-        
-        if (autoConnectCheck.checked) {
-            let connectionsMade = 0;
-            
-            GRAPH.nodes.forEach(existingStop => {
-                if (existingStop === name) return;
-                
-                const existingCoord = coords.get(existingStop);
-                if (!existingCoord) return;
-                
-                const distance = calculateDistance(lat, lng, existingCoord.lat, existingCoord.lng);
-                
-                if (distance < 1) {
-                    GRAPH.edges.push({
-                        from: name,
-                        to: existingStop,
-                        w: distance
-                    });
-                    connectionsMade++;
-                }
-            });
-            
-            setMsg(simMsg, `Added "${name}" with ${connectionsMade} connection(s)`);
-        } else {
-            setMsg(simMsg, `Added "${name}"`);
-        }
-        
-        netPill.textContent = `Network: ${GRAPH.nodes.length} stops · ${GRAPH.edges.length} routes`;
-        populateDropdowns();
-        renderStops();
-        renderEdges();
-        
-        addStopModal.style.display = "none";
-        
-        setKpis({
-            distance: totalDistance,
-            stops: GRAPH.nodes.length,
-            connections: GRAPH.edges.length,
-            status: "🟢 Updated"
-        });
-    });
-    
-    window.addEventListener('click', function(event) {
-        if (event.target === addStopModal) {
-            addStopModal.style.display = "none";
-        }
-    });
     
     document.addEventListener('keydown', function(event) {
         if ((event.ctrlKey || event.metaKey) && event.key === 'r') {
             event.preventDefault();
             computeRoute();
-        }
-        
-        if (event.key === 'Escape' && addStopModal.style.display === "flex") {
-            addStopModal.style.display = "none";
         }
         
         if (event.key === ' ' && !event.target.matches('input, textarea, select')) {
@@ -1284,6 +1368,11 @@ async function initializeSimulation() {
     console.log('Initializing simulation...');
     
     try {
+        if (hasInitialized) {
+            console.warn('Simulation already initialized');
+            return;
+        }
+        hasInitialized = true;
         initializeDOMReferences();
         initMap();
         setupEventListeners();
@@ -1317,6 +1406,8 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM loaded, starting simulation...');
     setTimeout(initializeSimulation, 100);
 });
+
+window.initSimulation = initializeSimulation;
 
 // Export for debugging
 window.simulation = {
