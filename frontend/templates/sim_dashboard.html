@@ -9,6 +9,12 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <title>Transport Hub Simulation - Live Map</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
     
     <!-- Leaflet Routing Machine CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
@@ -32,6 +38,97 @@
         box-sizing: border-box;
       }
 
+      body {
+        background: radial-gradient(
+          1200px 800px at 20% 10%,
+          #13224a 0%,
+          var(--bg) 55%,
+          #070b14 100%
+        );
+        color: var(--text);
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+        min-height: 100vh;
+        overflow-x: hidden;
+        display: flex;
+      }
+
+      .sidebar {
+        width: 250px;
+        background: linear-gradient(135deg, #0a192f 0%, #1e3a8a 100%);
+        color: white;
+        height: 100vh;
+        position: fixed;
+        left: 0;
+        top: 0;
+        overflow-y: auto;
+        box-shadow: 5px 0 20px rgba(0, 0, 0, 0.1);
+        z-index: 100;
+      }
+
+      .sidebar-header {
+        padding: 30px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        text-align: center;
+      }
+
+      .sidebar-header h2 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        background: linear-gradient(90deg, #60a5fa, #93c5fd);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 5px;
+      }
+
+      .sidebar-header p {
+        color: #94a3b8;
+        font-size: 0.9rem;
+      }
+
+      .nav-links {
+        padding: 20px 0;
+      }
+
+      .nav-item {
+        padding: 15px 25px;
+        color: #cbd5e1;
+        text-decoration: none;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        transition: all 0.3s ease;
+        border-left: 3px solid transparent;
+      }
+
+      .nav-item:hover {
+        background: rgba(59, 130, 246, 0.1);
+        color: white;
+        border-left-color: #3b82f6;
+      }
+
+      .nav-item.active {
+        background: rgba(59, 130, 246, 0.2);
+        color: white;
+        border-left-color: #3b82f6;
+      }
+
+      .nav-item i {
+        width: 20px;
+        text-align: center;
+      }
+
+      .main-content {
+        flex: 1;
+        margin-left: 250px;
+        min-height: 100vh;
+        width: calc(100% - 250px);
+      }
+
+      .wrap {
+        max-width: 1600px;
+        margin: 0 auto;
+        padding: 18px;
+      }
       body {
         background: radial-gradient(
           1200px 800px at 20% 10%,
@@ -434,12 +531,108 @@
           0 0 20px rgba(251, 191, 36, 0.4);
         z-index: 1000;
       }
+      .stop-icon {
+        background: rgba(30, 64, 175, 0.9);
+        border: 2px solid rgba(255, 255, 255, 0.9);
+        border-radius: 50%;
+        width: 48px !important;
+        height: 48px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-weight: bold;
+        color: white;
+        box-shadow:
+          0 10px 24px rgba(15, 23, 42, 0.6),
+          0 0 18px rgba(59, 130, 246, 0.45);
+        font-size: 18px;
+        animation: float 3.6s ease-in-out infinite;
+      }
+
+      .stop-icon.start {
+        background: rgba(34, 197, 94, 0.95);
+        animation: pulse-green 2s infinite;
+      }
+
+      .stop-icon.end {
+        background: rgba(239, 68, 68, 0.95);
+        animation: pulse-red 2s infinite;
+      }
+
+      .stop-icon.path {
+        background: rgba(16, 185, 129, 0.92);
+      }
+
+      .stop-icon.explored {
+        background: rgba(96, 165, 250, 0.78);
+      }
+
+      .bus-icon {
+        background: rgba(245, 158, 11, 0.95);
+        border: 3px solid rgba(255, 255, 255, 0.95);
+        border-radius: 50%;
+        width: 62px !important;
+        height: 62px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-size: 28px;
+        box-shadow:
+          0 14px 28px rgba(245, 158, 11, 0.45),
+          0 0 20px rgba(251, 191, 36, 0.4);
+        z-index: 1000;
+      }
 
       @keyframes pulse-green {
         0%, 100% { transform: scale(1); }
         50% { transform: scale(1.1); }
       }
 
+      @keyframes pulse-red {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+      }
+
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-4px); }
+      }
+
+      .road-line {
+        stroke: #2563eb;
+        stroke-width: 9;
+        stroke-dasharray: none;
+        fill: none;
+        opacity: 0.85;
+      }
+
+      .road-line.path {
+        stroke: #10b981;
+        stroke-width: 12;
+        opacity: 0.95;
+        stroke-dasharray: 14 10;
+        animation: dash 1.2s linear infinite;
+      }
+
+      .road-line.casing {
+        stroke: rgba(15, 23, 42, 0.75);
+        stroke-width: 14;
+        opacity: 0.55;
+      }
+
+      .road-line.path.casing {
+        stroke: rgba(15, 118, 110, 0.6);
+        stroke-width: 18;
+        opacity: 0.5;
+      }
+
+      .road-line.glow {
+        filter: drop-shadow(0 0 8px rgba(37, 99, 235, 0.5));
+      }
+
+      .road-line.path.glow {
+        filter: drop-shadow(0 0 10px rgba(16, 185, 129, 0.7));
+      }
       @keyframes pulse-red {
         0%, 100% { transform: scale(1); }
         50% { transform: scale(1.1); }
@@ -509,6 +702,17 @@
         border-radius: 10px;
         padding: 6px 10px;
         box-shadow: 0 10px 20px rgba(15, 23, 42, 0.35);
+      }
+      .weight-label {
+        background: rgba(248, 250, 252, 0.95);
+        color: #0f172a;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        border-radius: 12px;
+        padding: 4px 8px;
+        font: 700 11px system-ui;
+        white-space: nowrap;
+        pointer-events: none;
+        box-shadow: 0 8px 16px rgba(15, 23, 42, 0.2);
       }
 
       .overlayTopRight {
@@ -701,6 +905,53 @@
       <div class="topbar">
         <div class="title">
           <h2>🚌 Transport Hub Simulation - Live Map</h2>
+  <body>
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <h2>Transport Hub</h2>
+        <p>Administrator Panel</p>
+      </div>
+      <div class="nav-links">
+        <a href="{{ url_for('admin_dashboard') }}" class="nav-item">
+          <i class="fas fa-tachometer-alt"></i>
+          <span>Dashboard</span>
+        </a>
+        <a href="#" class="nav-item">
+          <i class="fas fa-users"></i>
+          <span>Passengers</span>
+        </a>
+        <a href="{{ url_for('admin_bus_management') }}" class="nav-item">
+          <i class="fas fa-bus"></i>
+          <span>Bus Management</span>
+        </a>
+        <a href="{{ url_for('sim_dashboard') }}" class="nav-item active">
+          <i class="fas fa-project-diagram"></i>
+          <span>Simulation</span>
+        </a>
+        <a href="{{ url_for('admin_routes') }}" class="nav-item">
+          <i class="fas fa-route"></i>
+          <span>Routes</span>
+        </a>
+        <a href="#" class="nav-item">
+          <i class="fas fa-chart-line"></i>
+          <span>Analytics</span>
+        </a>
+        <a href="#" class="nav-item">
+          <i class="fas fa-cog"></i>
+          <span>Settings</span>
+        </a>
+        <a href="{{ url_for('logout') }}" class="nav-item">
+          <i class="fas fa-sign-out-alt"></i>
+          <span>Logout</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="wrap">
+      <div class="topbar">
+        <div class="title">
+          <h2>🚌 Transport Hub Simulation - Live Map</h2>
           <div class="sub">
             Real Lahore locations • Auto-connected stops • Live bus tracking
           </div>
@@ -743,6 +994,10 @@
             <button type="button" class="btn secondary" id="swapBtn">
               ↕ Swap
             </button>
+            <button type="button" class="btn" id="computeBtn">
+              🚀 Compute Route
+            </button>
+          </div>
             <button type="button" class="btn" id="computeBtn">
               🚀 Compute Route
             </button>
@@ -792,6 +1047,10 @@
             <label class="toggle">
               <input type="checkbox" id="tWeights" checked />
               ⚖️ Distance Labels
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="tLabels" />
+              🏷️ Stop Labels
             </label>
             <label class="toggle">
               <input type="checkbox" id="tLabels" />
@@ -858,11 +1117,21 @@
             <b>🔗 Auto-Connect:</b> Stops connect to nearby nodes for navigation<br>
             <b>🚌 Bus Animation:</b> Bus follows the computed Dijkstra path
           </div>
+          <div id="simMsg" class="msg">
+            💡 Select start and destination to find route
+          </div>
+
+          <div class="hint">
+            <b>📍 Real Lahore Locations:</b> Stops are placed at actual Lahore landmarks<br>
+            <b>🔗 Auto-Connect:</b> Stops connect to nearby nodes for navigation<br>
+            <b>🚌 Bus Animation:</b> Bus follows the computed Dijkstra path
+          </div>
         </div>
 
         <!-- RIGHT: MAP -->
         <div class="card canvasCard">
           <div class="sectionTitle" style="margin-bottom: 10px">
+            <h3>🏙️ Transport Hub Network</h3>
             <h3>🏙️ Transport Hub Network</h3>
             <span class="pill" id="routePill">Path: Not Selected</span>
           </div>
@@ -897,6 +1166,48 @@
       </div>
       </div>
     </div>
+      </div>
+    </div>
+
+    <!-- Add Stop Modal -->
+    <div id="addStopModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>➕ Add New Stop</h3>
+          <button class="close-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <label for="stopName">Stop Name</label>
+          <input type="text" id="stopName" placeholder="Enter stop name" />
+          
+          <div class="row" style="margin-top: 10px">
+            <div>
+              <label for="stopLat">Latitude</label>
+              <input type="number" id="stopLat" step="0.000001" placeholder="31.5497" />
+            </div>
+            <div>
+              <label for="stopLng">Longitude</label>
+              <input type="number" id="stopLng" step="0.000001" placeholder="74.3436" />
+            </div>
+          </div>
+          
+          <div style="margin-top: 10px">
+            <label>
+              <input type="checkbox" id="autoConnectCheck" checked />
+              Auto-connect to nearest stops
+            </label>
+          </div>
+          
+          <div class="hint" style="margin-top: 10px">
+            💡 Click on map to set coordinates automatically
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn secondary" id="cancelAddStop">Cancel</button>
+          <button type="button" class="btn" id="confirmAddStop">Add Stop</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -904,6 +1215,9 @@
     <!-- Your Simulation JS -->
     <script src="{{ url_for('static', filename='sim.js') }}"></script>
     
+    <!-- Simulation initialization is handled inside sim.js -->
+  </body>
+</html>
     <!-- Simulation initialization is handled inside sim.js -->
   </body>
 </html>
