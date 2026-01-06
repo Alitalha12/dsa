@@ -487,6 +487,20 @@
             margin-top: 6px;
         }
 
+        .map-picker {
+            height: 240px;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .map-hint {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 6px;
+        }
+
         .form-actions {
             display: flex;
             gap: 10px;
@@ -1015,6 +1029,29 @@
                         <div class="map-hint">Tip: drag the marker to fine-tune coordinates.</div>
                     </div>
 
+                    <div class="form-group">
+                        <label class="form-label">Stop Coordinates *</label>
+                        <div class="form-hint">Search or click on the map to update latitude/longitude.</div>
+                        <div class="row" style="gap: 10px; margin-top: 10px;">
+                            <div style="flex: 1;">
+                                <input type="text" id="editStopSearch" class="form-control" placeholder="Search location (e.g., Liberty Market)">
+                            </div>
+                            <div>
+                                <button type="button" class="btn-secondary" id="editStopSearchBtn">Search</button>
+                            </div>
+                        </div>
+                        <div class="row" style="gap: 10px; margin-top: 10px;">
+                            <div style="flex: 1;">
+                                <input type="number" id="editStopLat" class="form-control" placeholder="Latitude" step="0.000001" required>
+                            </div>
+                            <div style="flex: 1;">
+                                <input type="number" id="editStopLng" class="form-control" placeholder="Longitude" step="0.000001" required>
+                            </div>
+                        </div>
+                        <div id="editStopMap" class="map-picker"></div>
+                        <div class="map-hint">Tip: drag the marker to fine-tune coordinates.</div>
+                    </div>
+
                     <div class="form-actions">
                         <button type="button" class="btn-secondary" onclick="closeModal('editStopModal')">
                             Cancel
@@ -1502,21 +1539,6 @@
             if (!routeName) {
                 showError('Route name is required');
                 return;
-            }
-
-            // First, check if route already exists via debug endpoint
-            try {
-                console.log('Checking if route exists...');
-                const checkResponse = await fetch(`/api/debug/routes-check/${encodeURIComponent(routeName)}`);
-                const checkData = await checkResponse.json();
-                console.log('Route check result:', checkData);
-
-                if (checkData.exists_in_route_names) {
-                    showError(`Route "${routeName}" already exists! Please choose a different name.`);
-                    return;
-                }
-            } catch (checkError) {
-                console.log('Could not check route, proceeding anyway...', checkError);
             }
 
             const submitBtn = document.getElementById('createRouteSubmit');
