@@ -11,7 +11,8 @@ from dsa_structures.passenger_routes import PassengerBookingSystem
 import heapq
 from datetime import time, timedelta
 import uuid
-from math import radians, sin, cos, asin, sqrt
+from math import radians, sin, cos, asin, sqrt, exp
+import random
 
 def _to_float(x):
     try:
@@ -29,6 +30,41 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
     c = 2 * asin(sqrt(a))
     return R * c
+
+DEFAULT_SERVICE_CALENDAR = {
+    "weekday": {"start_time": "06:00", "end_time": "22:00", "headway_minutes": 15},
+    "weekend": {"start_time": "08:00", "end_time": "20:00", "headway_minutes": 20},
+}
+
+def _parse_time(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value).strip(), "%H:%M").time()
+    except ValueError:
+        return None
+
+def _get_route_service_window(route, travel_date):
+    calendar = route.get("service_calendar") if isinstance(route, dict) else {}
+    calendar = calendar if isinstance(calendar, dict) else {}
+    schedule = {
+        "weekday": {**DEFAULT_SERVICE_CALENDAR["weekday"], **calendar.get("weekday", {})},
+        "weekend": {**DEFAULT_SERVICE_CALENDAR["weekend"], **calendar.get("weekend", {})},
+    }
+    day_key = "weekday"
+    if isinstance(travel_date, datetime):
+        day_key = "weekend" if travel_date.weekday() >= 5 else "weekday"
+    day_schedule = schedule[day_key]
+    headway = day_schedule.get("headway_minutes", DEFAULT_SERVICE_CALENDAR[day_key]["headway_minutes"])
+    try:
+        headway = int(headway)
+    except (TypeError, ValueError):
+        headway = DEFAULT_SERVICE_CALENDAR[day_key]["headway_minutes"]
+    return {
+        "start_time": day_schedule["start_time"],
+        "end_time": day_schedule["end_time"],
+        "headway_minutes": headway,
+    }
 
 def _coord_index(routes_data):
     """
@@ -56,6 +92,9 @@ app = Flask(__name__,
             template_folder='../frontend/templates')
 app.secret_key = 'your-secret-key-here-change-in-production'
 CORS(app)
+
+PASSENGER_QUEUES = {}
+LAST_DEMAND_UPDATE = None
 
 # Initialize data handlers
 data_dir = os.path.join(os.path.dirname(__file__), 'data')
@@ -118,6 +157,86 @@ def _unique_stops_from_routes(routes_data):
             if name and name not in stops:
                 stops.append(name)
     return stops
+
+def _poisson(lam):
+    if lam <= 0:
+        return 0
+    L = exp(-lam)
+    k = 0
+    p = 1.0
+    while p > L:
+        k += 1
+        p *= random.random()
+    return max(0, k - 1)
+
+def _simulate_passenger_demand(routes_data, minutes=5):
+    global LAST_DEMAND_UPDATE
+    bus_manager.load_routes()
+    coords = _coord_index(routes_data)
+    stop_rates = {}
+
+    for route in routes_data.get("routes", []):
+        for stop in route.get("stops", []):
+            if not isinstance(stop, dict):
+                continue
+            stop_name = (stop.get("stop_name") or "").strip()
+            if not stop_name:
+                continue
+            arrival_rate = stop.get("arrival_rate", 2.0)
+            try:
+                arrival_rate = float(arrival_rate)
+            except (TypeError, ValueError):
+                arrival_rate = 2.0
+            stop_rates[stop_name] = arrival_rate
+            arrivals = _poisson(arrival_rate * minutes)
+            PASSENGER_QUEUES[stop_name] = PASSENGER_QUEUES.get(stop_name, 0) + arrivals
+
+    for bus in bus_manager.bus_list.get_all_buses():
+        route = bus_manager._find_route_for_bus(bus)
+        if not route:
+            continue
+        stops = route.get("stops", [])
+        if not stops:
+            continue
+        current_index = int(bus.get("current_stop_index", 0))
+        current_index = max(0, min(current_index, len(stops) - 1))
+        stop_name = stops[current_index].get("stop_name")
+        if not stop_name:
+            continue
+
+        queue = PASSENGER_QUEUES.get(stop_name, 0)
+        capacity = int(bus.get("capacity", 50))
+        current_passengers = int(bus.get("current_passengers", 0))
+        available = max(0, capacity - current_passengers)
+        boarding = min(queue, available)
+
+        if boarding > 0:
+            PASSENGER_QUEUES[stop_name] = queue - boarding
+            bus["current_passengers"] = current_passengers + boarding
+            bus_manager.update_bus(bus["id"], {"current_passengers": bus["current_passengers"]})
+
+        next_index = (current_index + 1) % len(stops)
+        bus["current_stop_index"] = next_index
+        bus_manager.update_bus(bus["id"], {"current_stop_index": next_index})
+        next_stop_name = stops[next_index].get("stop_name")
+        if next_stop_name and next_stop_name in coords:
+            lat, lng = coords[next_stop_name]
+            bus_manager.update_bus(bus["id"], {"current_lat": lat, "current_lng": lng})
+
+    LAST_DEMAND_UPDATE = datetime.now().isoformat()
+
+    return {
+        "queues": PASSENGER_QUEUES,
+        "last_updated": LAST_DEMAND_UPDATE
+    }
+
+def _estimate_eta_minutes(current_lat, current_lng, next_lat, next_lng, speed_kmph=30):
+    if current_lat is None or current_lng is None or next_lat is None or next_lng is None:
+        return None
+    distance_km = _haversine_km(current_lat, current_lng, next_lat, next_lng)
+    if speed_kmph <= 0:
+        return None
+    return round((distance_km / speed_kmph) * 60, 1)
 def _build_weighted_graph(routes_data, sim_data=None):
     """
     Undirected weighted graph from routes.json.
@@ -130,6 +249,7 @@ def _build_weighted_graph(routes_data, sim_data=None):
       4) fallback 1.0
     """
     graph = {}  # node -> {neighbor: weight}
+    edge_meta = {}  # node -> {neighbor: {distance, time, fare, route_id}}
     edges = []
     seen = set()
 
@@ -137,13 +257,15 @@ def _build_weighted_graph(routes_data, sim_data=None):
     route_distances = sim_data.get("route_distances", {})
     coords = _coord_index(routes_data)
 
-    def add_edge(a, b, w):
+    def add_edge(a, b, w, meta):
         graph.setdefault(a, {})
         graph.setdefault(b, {})
         prev = graph[a].get(b)
         if prev is None or w < prev:
             graph[a][b] = w
             graph[b][a] = w
+            edge_meta.setdefault(a, {})[b] = meta
+            edge_meta.setdefault(b, {})[a] = meta
 
     for r in routes_data.get("routes", []):
         rid = r.get("route_id")
@@ -159,25 +281,49 @@ def _build_weighted_graph(routes_data, sim_data=None):
 
             # 1) preferred: routes.json schema
             w = None
-            if i + 1 < len(stop_dicts):
-                w = _safe_distance(stop_dicts[i + 1].get("distance_from_previous"), None)
+            time_minutes = None
+            distance_km = None
+            dep_time = _parse_time(stop_dicts[i].get("departure_time") or stop_dicts[i].get("arrival_time"))
+            arr_time = _parse_time(stop_dicts[i + 1].get("arrival_time") or stop_dicts[i + 1].get("departure_time"))
+            if dep_time and arr_time:
+                dep_dt = datetime.combine(datetime.today(), dep_time)
+                arr_dt = datetime.combine(datetime.today(), arr_time)
+                delta_minutes = int((arr_dt - dep_dt).total_seconds() / 60)
+                if delta_minutes <= 0:
+                    delta_minutes += 24 * 60
+                if delta_minutes > 0:
+                    time_minutes = float(delta_minutes)
+            if w is None and i + 1 < len(stop_dicts):
+                distance_km = _safe_distance(stop_dicts[i + 1].get("distance_from_previous"), None)
 
             # 2) legacy sim_distances
             if w is None and isinstance(legacy_dlist, list) and i < len(legacy_dlist):
-                w = _safe_distance(legacy_dlist[i], None)
+                distance_km = _safe_distance(legacy_dlist[i], None)
 
             # 3) coords -> haversine
-            if w is None:
+            if distance_km is None:
                 ca = coords.get(a)
                 cb = coords.get(b)
                 if ca and cb:
-                    w = _haversine_km(ca[0], ca[1], cb[0], cb[1])
+                    distance_km = _haversine_km(ca[0], ca[1], cb[0], cb[1])
 
             # 4) fallback
-            if w is None:
-                w = 1.0
+            if distance_km is None:
+                distance_km = 1.0
+            if time_minutes is None:
+                wait_time = stop_dicts[i].get("wait_time", 5)
+                time_minutes = distance_km * 2 + float(wait_time)
 
-            add_edge(a, b, w)
+            w = distance_km
+            fare = round(distance_km * 10, 2)
+            meta = {
+                "distance": distance_km,
+                "time": time_minutes,
+                "fare": fare,
+                "route_id": rid,
+            }
+
+            add_edge(a, b, w, meta)
 
             k = tuple(sorted((a, b)))
             if k not in seen:
@@ -186,58 +332,139 @@ def _build_weighted_graph(routes_data, sim_data=None):
                     "from": a,
                     "to": b,
                     "w": w,
+                    "time": time_minutes,
+                    "fare": fare,
                     "route_id": rid,
                     "route_name": r.get("route_name"),
                 })
 
-    return graph, edges, coords
+    return graph, edges, coords, edge_meta
 
-def _dijkstra(graph, start, end):
+def _dijkstra(graph, start, end, criteria="distance", edge_meta=None, transfer_penalty=5):
     """Dijkstra for shortest path + settled order animation support"""
     import heapq
 
     if start not in graph or end not in graph:
         return {"path": [], "distance": None, "settled_order": []}
 
-    dist = {n: float("inf") for n in graph}
-    prev = {n: None for n in graph}
-    dist[start] = 0.0
+    if not edge_meta:
+        dist = {n: float("inf") for n in graph}
+        prev = {n: None for n in graph}
+        dist[start] = 0.0
 
-    pq = [(0.0, start)]
+        pq = [(0.0, start)]
+        visited = set()
+        settled_order = []
+
+        while pq:
+            d, u = heapq.heappop(pq)
+            if u in visited:
+                continue
+            visited.add(u)
+            settled_order.append(u)
+
+            if u == end:
+                break
+
+            for v, w in graph[u].items():
+                if v in visited:
+                    continue
+                nd = d + w
+                if nd < dist[v]:
+                    dist[v] = nd
+                    prev[v] = u
+                    heapq.heappush(pq, (nd, v))
+
+        if dist[end] == float("inf"):
+            return {"path": [], "distance": None, "settled_order": settled_order}
+
+        # reconstruct
+        path = []
+        cur = end
+        while cur is not None:
+            path.append(cur)
+            cur = prev[cur]
+        path.reverse()
+
+        return {"path": path, "distance": dist[end], "settled_order": settled_order}
+
+    def edge_cost(info, prev_route):
+        if criteria == "time":
+            return info["time"]
+        if criteria == "fare":
+            return info["fare"]
+        if criteria == "transfers":
+            transfer = 0
+            if prev_route and info.get("route_id") and info.get("route_id") != prev_route:
+                transfer = transfer_penalty
+            return transfer + info["distance"] * 0.001
+        return info["distance"]
+
+    dist = {(start, None): 0.0}
+    prev = {(start, None): None}
+    pq = [(0.0, start, None)]
     visited = set()
     settled_order = []
 
     while pq:
-        d, u = heapq.heappop(pq)
-        if u in visited:
+        d, u, route_id = heapq.heappop(pq)
+        state = (u, route_id)
+        if state in visited:
             continue
-        visited.add(u)
+        visited.add(state)
         settled_order.append(u)
 
         if u == end:
             break
 
-        for v, w in graph[u].items():
-            if v in visited:
+        for v, meta in edge_meta.get(u, {}).items():
+            next_state = (v, meta.get("route_id"))
+            if next_state in visited:
                 continue
-            nd = d + w
-            if nd < dist[v]:
-                dist[v] = nd
-                prev[v] = u
-                heapq.heappush(pq, (nd, v))
+            nd = d + edge_cost(meta, route_id)
+            if nd < dist.get(next_state, float("inf")):
+                dist[next_state] = nd
+                prev[next_state] = state
+                heapq.heappush(pq, (nd, v, meta.get("route_id")))
 
-    if dist[end] == float("inf"):
+    end_states = [(state, value) for state, value in dist.items() if state[0] == end]
+    if not end_states:
         return {"path": [], "distance": None, "settled_order": settled_order}
 
-    # reconstruct
+    best_state, best_cost = min(end_states, key=lambda item: item[1])
+
     path = []
-    cur = end
-    while cur is not None:
-        path.append(cur)
-        cur = prev[cur]
+    current = best_state
+    while current is not None:
+        path.append(current[0])
+        current = prev.get(current)
     path.reverse()
 
-    return {"path": path, "distance": dist[end], "settled_order": settled_order}
+    total_distance = 0.0
+    total_time = 0.0
+    total_fare = 0.0
+    transfers = 0
+    last_route = None
+    for idx in range(len(path) - 1):
+        info = edge_meta[path[idx]][path[idx + 1]]
+        total_distance += info["distance"]
+        total_time += info["time"]
+        total_fare += info["fare"]
+        route_id = info.get("route_id")
+        if last_route and route_id and route_id != last_route:
+            transfers += 1
+        if route_id:
+            last_route = route_id
+
+    return {
+        "path": path,
+        "distance": total_distance,
+        "time": total_time,
+        "fare": round(total_fare, 2),
+        "transfers": transfers,
+        "cost": best_cost,
+        "settled_order": settled_order,
+    }
 
 # ==================== BUS MANAGEMENT DSA STRUCTURES ====================
 
@@ -469,12 +696,81 @@ class MaxHeapBusPriority:
 
 class BusManager:
     """Main Bus Management System"""
-    def __init__(self, data_file='data/buses.json'):
+    def __init__(self, data_file='data/buses.json', routes_file=None):
         self.data_file = data_file
+        self.routes_file = routes_file
+        self.routes_index = {}
         self.bus_list = DoublyLinkedListBus()
         self.min_heap_arrival = MinHeapBusArrival()
         self.max_heap_priority = MaxHeapBusPriority()
+        self.load_routes()
         self.load_data()
+
+    def load_routes(self):
+        """Load routes for schedule lookup."""
+        self.routes_index = {"by_id": {}, "by_name": {}}
+        if not self.routes_file or not os.path.exists(self.routes_file):
+            return
+        try:
+            with open(self.routes_file, 'r') as f:
+                data = json.load(f)
+            routes_list = data.get('routes', []) if isinstance(data, dict) else []
+            for route in routes_list:
+                if not isinstance(route, dict):
+                    continue
+                route_id = route.get('route_id')
+                route_name = route.get('route_name')
+                if route_id:
+                    self.routes_index["by_id"][str(route_id)] = route
+                if route_name:
+                    self.routes_index["by_name"][route_name] = route
+        except Exception as e:
+            print(f"Error loading routes for bus schedule: {e}")
+
+    def _find_route_for_bus(self, bus):
+        route_id = bus.get('route_id')
+        route_name = bus.get('route_name')
+        if route_id and str(route_id) in self.routes_index["by_id"]:
+            return self.routes_index["by_id"][str(route_id)]
+        if route_name and route_name in self.routes_index["by_name"]:
+            return self.routes_index["by_name"][route_name]
+        return None
+
+    def _compute_next_arrival(self, route, current_dt):
+        service = _get_route_service_window(route, current_dt)
+        start_time = _parse_time(service["start_time"])
+        end_time = _parse_time(service["end_time"])
+        if not start_time or not end_time:
+            return "08:00"
+        headway = service["headway_minutes"]
+        base_dt = datetime.combine(current_dt.date(), start_time)
+        end_dt = datetime.combine(current_dt.date(), end_time)
+        if current_dt <= base_dt:
+            return base_dt.strftime("%H:%M")
+        if headway <= 0:
+            return base_dt.strftime("%H:%M")
+        diff_minutes = int((current_dt - base_dt).total_seconds() / 60)
+        intervals = (diff_minutes + headway - 1) // headway
+        next_dt = base_dt + timedelta(minutes=intervals * headway)
+        if next_dt > end_dt:
+            return base_dt.strftime("%H:%M")
+        return next_dt.strftime("%H:%M")
+
+    def _normalize_next_arrival(self, bus):
+        if bus.get('next_arrival') not in (None, "", "auto"):
+            return
+        route = self._find_route_for_bus(bus)
+        if not route:
+            bus['next_arrival'] = bus.get('next_arrival', '08:00') or '08:00'
+            return
+        bus['next_arrival'] = self._compute_next_arrival(route, datetime.now())
+
+    def _normalize_bus_fields(self, bus):
+        bus.setdefault('current_stop_index', 0)
+        bus.setdefault('speed_kmph', 35)
+        bus.setdefault('current_lat', None)
+        bus.setdefault('current_lng', None)
+        bus.setdefault('current_passengers', 0)
     
     def load_data(self):
         """Load bus data from JSON file"""
@@ -483,6 +779,8 @@ class BusManager:
                 with open(self.data_file, 'r') as f:
                     buses = json.load(f)
                     for bus in buses:
+                        self._normalize_bus_fields(bus)
+                        self._normalize_next_arrival(bus)
                         self.bus_list.add_bus(bus)
                         self.min_heap_arrival.push(bus)
                         self.max_heap_priority.push(bus)
@@ -512,6 +810,9 @@ class BusManager:
         bus_data['created_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         bus_data['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        self._normalize_next_arrival(bus_data)
+        self._normalize_bus_fields(bus_data)
+
         # Add to data structures
         self.bus_list.add_bus(bus_data)
         self.min_heap_arrival.push(bus_data)
@@ -524,6 +825,12 @@ class BusManager:
     
     def update_bus(self, bus_id, updated_data):
         """Update existing bus"""
+        if updated_data.get('next_arrival') == 'auto':
+            bus_node = self.bus_list.find_bus(bus_id)
+            if bus_node:
+                route = self._find_route_for_bus(bus_node.bus_data)
+                if route:
+                    updated_data['next_arrival'] = self._compute_next_arrival(route, datetime.now())
         success = self.bus_list.update_bus(bus_id, updated_data)
         
         if success:
@@ -553,11 +860,14 @@ class BusManager:
         bus_node = self.bus_list.find_bus(bus_id)
         
         if bus_node:
+            self.load_routes()
             bus_node.bus_data['route_id'] = route_id
             bus_node.bus_data['route_name'] = route_name
             
             # Update demand based on route (simulated)
             bus_node.bus_data['route_demand'] = 50
+            bus_node.bus_data['current_stop_index'] = 0
+            self._normalize_next_arrival(bus_node.bus_data)
             
             # Rebuild heaps
             all_buses = self.bus_list.get_all_buses()
@@ -621,7 +931,7 @@ class BusManager:
 
 # Initialize Bus Manager
 buses_file = os.path.join(data_dir, 'buses.json')
-bus_manager = BusManager(buses_file)
+bus_manager = BusManager(buses_file, routes_file=routes_file)
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -990,7 +1300,7 @@ def api_sim_graph():
 
     routes_data = _load_routes_raw()
     sim_data = _sim_read()
-    graph, edges, coords = _build_weighted_graph(routes_data, sim_data)
+    graph, edges, coords, _ = _build_weighted_graph(routes_data, sim_data)
 
     nodes = []
     for name in sorted(graph.keys()):
@@ -1014,10 +1324,40 @@ def api_sim_path():
 
     routes_data = _load_routes_raw()
     sim_data = _sim_read()
-    graph, _, _ = _build_weighted_graph(routes_data, sim_data)
+    criteria = (payload.get("criteria") or "distance").strip().lower()
+    graph, _, _, edge_meta = _build_weighted_graph(routes_data, sim_data)
 
-    result = _dijkstra(graph, start, end)
+    result = _dijkstra(graph, start, end, criteria=criteria, edge_meta=edge_meta)
     return jsonify({"success": True, **result})
+
+@app.route('/api/sim/demand_step', methods=['POST'])
+def api_sim_demand_step():
+    if not session.get('logged_in') or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    payload = request.get_json(force=True, silent=True) or {}
+    minutes = payload.get("minutes", 5)
+    try:
+        minutes = int(minutes)
+    except (TypeError, ValueError):
+        minutes = 5
+    minutes = max(1, minutes)
+
+    routes_data = _load_routes_raw()
+    stats = _simulate_passenger_demand(routes_data, minutes=minutes)
+    bus_manager.save_data()
+    return jsonify({"success": True, **stats})
+
+@app.route('/api/sim/demand_stats', methods=['GET'])
+def api_sim_demand_stats():
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    return jsonify({
+        "success": True,
+        "queues": PASSENGER_QUEUES,
+        "last_updated": LAST_DEMAND_UPDATE
+    })
 
 
 @app.route('/admin/dashboard_stats')
@@ -1179,11 +1519,15 @@ def add_bus():
             'current_passengers': 0,
             'status': data.get('status', 'active'),
             'type': data.get('type', 'regular'),
-            'next_arrival': data.get('next_arrival', '08:00'),
+            'next_arrival': data.get('next_arrival', 'auto'),
             'route_id': data.get('route_id'),
             'route_name': data.get('route_name', ''),
             'route_demand': data.get('route_demand', 0),
-            'timings': data.get('timings', [])
+            'timings': data.get('timings', []),
+            'current_lat': data.get('current_lat'),
+            'current_lng': data.get('current_lng'),
+            'current_stop_index': data.get('current_stop_index', 0),
+            'speed_kmph': data.get('speed_kmph', 35)
         }
         
         # Add bus
@@ -1210,6 +1554,17 @@ def update_bus(bus_id):
         # Remove immutable fields
         data.pop('id', None)
         data.pop('created_at', None)
+
+        if 'current_stop_index' in data:
+            try:
+                data['current_stop_index'] = int(data['current_stop_index'])
+            except (TypeError, ValueError):
+                return jsonify({'error': 'current_stop_index must be an integer'}), 400
+        if 'speed_kmph' in data:
+            try:
+                data['speed_kmph'] = int(data['speed_kmph'])
+            except (TypeError, ValueError):
+                return jsonify({'error': 'speed_kmph must be an integer'}), 400
         
         # Update bus
         success = bus_manager.update_bus(bus_id, data)
@@ -1570,7 +1925,11 @@ def update_stop_in_route(route_id, position):
             'wait_time': data.get('wait_time'),
             'location': data.get('location', ''),
             'latitude': data.get('latitude'),
-            'longitude': data.get('longitude')
+            'longitude': data.get('longitude'),
+            'arrival_time': data.get('arrival_time'),
+            'departure_time': data.get('departure_time'),
+            'headway_minutes': data.get('headway_minutes'),
+            'arrival_rate': data.get('arrival_rate')
         }
         
         # Update stop in route
@@ -1908,39 +2267,54 @@ def get_live_buses_api():
         return jsonify({'error': 'Unauthorized'}), 401
     
     try:
-        # Simulated live bus positions
         live_buses = []
-        
-        if 'buses' in booking_system.buses:
-            for bus in booking_system.buses['buses']:
-                if bus.get('status') == 'active':
-                    # Simulate random position
-                    import random
-                    stops = []
-                    route_name = bus.get('route_name', '')
-                    
-                    # Get stops for this route
-                    for route in booking_system.routes.get('routes', []):
-                        if route.get('route_name') == route_name:
-                            stops = [s['stop_name'] for s in route.get('stops', [])]
-                            break
-                    
-                    if stops:
-                        current_stop = random.choice(stops)
-                        next_stop_index = stops.index(current_stop) + 1
-                        next_stop = stops[next_stop_index] if next_stop_index < len(stops) else stops[0]
-                        
-                        live_buses.append({
-                            'bus_number': bus['bus_number'],
-                            'route_name': route_name,
-                            'current_stop': current_stop,
-                            'next_stop': next_stop,
-                            'passenger_count': bus.get('current_passengers', 0),
-                            'capacity': bus.get('capacity', 50),
-                            'status': 'moving',
-                            'speed': random.randint(30, 60),
-                            'eta': f"{random.randint(5, 15)} minutes"
-                        })
+        routes_data = booking_system.routes if 'routes' in booking_system.routes else _load_routes_raw()
+        coords = _coord_index(routes_data)
+
+        for bus in bus_manager.bus_list.get_all_buses():
+            if bus.get('status') != 'active':
+                continue
+            route = bus_manager._find_route_for_bus(bus)
+            if not route:
+                continue
+            stops = route.get('stops', [])
+            if not stops:
+                continue
+
+            current_index = int(bus.get('current_stop_index', 0))
+            current_index = max(0, min(current_index, len(stops) - 1))
+            next_index = (current_index + 1) % len(stops)
+            current_stop = stops[current_index].get('stop_name')
+            next_stop = stops[next_index].get('stop_name')
+            speed = int(bus.get('speed_kmph', 35))
+            eta_minutes = None
+
+            if next_stop and next_stop in coords:
+                current_lat = bus.get('current_lat')
+                current_lng = bus.get('current_lng')
+                next_lat, next_lng = coords[next_stop]
+                eta_minutes = _estimate_eta_minutes(current_lat, current_lng, next_lat, next_lng, speed)
+            elif next_stop:
+                distance_km = stops[next_index].get('distance_from_previous', 1.0)
+                try:
+                    distance_km = float(distance_km)
+                except (TypeError, ValueError):
+                    distance_km = 1.0
+                eta_minutes = round((distance_km / max(speed, 1)) * 60, 1)
+
+            live_buses.append({
+                'bus_number': bus.get('bus_number'),
+                'route_name': bus.get('route_name', ''),
+                'current_stop': current_stop,
+                'next_stop': next_stop,
+                'passenger_count': bus.get('current_passengers', 0),
+                'capacity': bus.get('capacity', 50),
+                'status': 'moving',
+                'speed': speed,
+                'current_lat': bus.get('current_lat'),
+                'current_lng': bus.get('current_lng'),
+                'eta_minutes': eta_minutes
+            })
         
         return jsonify({
             'success': True,
@@ -1950,6 +2324,43 @@ def get_live_buses_api():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tracking/update_position', methods=['POST'])
+def update_bus_position_api():
+    if not session.get('logged_in') or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    payload = request.get_json(force=True, silent=True) or {}
+    bus_id = payload.get('bus_id')
+    current_lat = payload.get('current_lat')
+    current_lng = payload.get('current_lng')
+    current_stop_index = payload.get('current_stop_index')
+    speed_kmph = payload.get('speed_kmph')
+
+    if bus_id is None:
+        return jsonify({'error': 'bus_id is required'}), 400
+
+    updates = {}
+    if current_lat is not None:
+        updates['current_lat'] = current_lat
+    if current_lng is not None:
+        updates['current_lng'] = current_lng
+    if current_stop_index is not None:
+        try:
+            updates['current_stop_index'] = int(current_stop_index)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'current_stop_index must be an integer'}), 400
+    if speed_kmph is not None:
+        try:
+            updates['speed_kmph'] = int(speed_kmph)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'speed_kmph must be an integer'}), 400
+
+    updated = bus_manager.update_bus(int(bus_id), updates)
+    if not updated:
+        return jsonify({'error': 'Bus not found'}), 404
+
+    return jsonify({'success': True, 'bus_id': bus_id, 'updates': updates})
 
 @app.route('/api/passenger/stats')
 def get_passenger_stats_api():
