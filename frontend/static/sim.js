@@ -60,17 +60,13 @@ let busMarker = null;
 let busAnimationInterval = null;
 
 // DOM Elements
-let startSelect, endSelect, computeBtn, stopBtn, pauseBtn, playBtn, swapBtn, addStopBtn;
+let startSelect, endSelect, computeBtn, stopBtn, pauseBtn, playBtn, swapBtn;
 let simMsg, searchStop;
 let tGrid, tWeights, tLabels, tExplored, tSatellite, tAutoConnect;
 let resetLayoutBtn, saveLayoutBtn, autoConnectBtn, clearRouteBtn;
 let kpiDistance, kpiStops, kpiConnections, kpiStatus, netPill, routePill, stopCount;
 let speedSlider, speedValue;
 let zoomInBtn, zoomOutBtn, fitBoundsBtn, zoomLevel;
-
-// Modal elements
-let addStopModal, stopNameInput, stopLatInput, stopLngInput, autoConnectCheck;
-let confirmAddStop, cancelAddStop, closeModal;
 
 // ===================== INITIALIZATION =====================
 function initializeDOMReferences() {
@@ -84,7 +80,6 @@ function initializeDOMReferences() {
     pauseBtn = document.getElementById("pauseBtn");
     playBtn = document.getElementById("playBtn");
     swapBtn = document.getElementById("swapBtn");
-    addStopBtn = document.getElementById("addStopBtn");
     simMsg = document.getElementById("simMsg");
     searchStop = document.getElementById("searchStop");
     
@@ -120,16 +115,6 @@ function initializeDOMReferences() {
     zoomOutBtn = document.getElementById("zoomOutBtn");
     fitBoundsBtn = document.getElementById("fitBoundsBtn");
     zoomLevel = document.getElementById("zoomLevel");
-    
-    // Modal elements
-    addStopModal = document.getElementById("addStopModal");
-    stopNameInput = document.getElementById("stopName");
-    stopLatInput = document.getElementById("stopLat");
-    stopLngInput = document.getElementById("stopLng");
-    autoConnectCheck = document.getElementById("autoConnectCheck");
-    confirmAddStop = document.getElementById("confirmAddStop");
-    cancelAddStop = document.getElementById("cancelAddStop");
-    closeModal = document.querySelector(".close-modal");
     
     console.log('DOM references initialized');
 }
@@ -452,6 +437,28 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
         Math.sin(dLng/2) * Math.sin(dLng/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c;
+}
+
+function computePathDistance(pathStops) {
+    if (!Array.isArray(pathStops) || pathStops.length < 2) return 0;
+    let distance = 0;
+    for (let i = 0; i < pathStops.length - 1; i++) {
+        const from = pathStops[i];
+        const to = pathStops[i + 1];
+        const edge = GRAPH.edges.find(e =>
+            (e.from === from && e.to === to) || (e.from === to && e.to === from)
+        );
+        if (edge && typeof edge.w === 'number') {
+            distance += edge.w;
+        } else {
+            const fromCoord = coords.get(from);
+            const toCoord = coords.get(to);
+            if (fromCoord && toCoord) {
+                distance += calculateDistance(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng);
+            }
+        }
+    }
+    return distance;
 }
 
 function computePathDistance(pathStops) {
@@ -1168,7 +1175,8 @@ function setupEventListeners() {
     // Search functionality
     searchStop.addEventListener('input', function() {
         const query = this.value.toLowerCase().trim();
-        
+        let firstMatch = null;
+
         if (!query) {
             stopMarkers.forEach(marker => {
                 if (marker) {
@@ -1186,6 +1194,7 @@ function setupEventListeners() {
             if (!marker) return;
             
             if (stopName.toLowerCase().includes(query)) {
+                if (!firstMatch) firstMatch = stopName;
                 marker.setOpacity(1);
                 marker.bringToFront();
                 
@@ -1201,6 +1210,30 @@ function setupEventListeners() {
                 }
             }
         });
+
+        if (firstMatch) {
+            const coord = coords.get(firstMatch);
+            if (coord) {
+                map.setView([coord.lat, coord.lng], Math.max(map.getZoom(), 14), { animate: true });
+            }
+        }
+    });
+
+    searchStop.addEventListener('keydown', function(event) {
+        if (event.key !== 'Enter') return;
+        const query = this.value.toLowerCase().trim();
+        if (!query) return;
+        const match = GRAPH.nodes.find((name) => name.toLowerCase().includes(query));
+        if (match) {
+            if (!startSelect.value) {
+                startSelect.value = match;
+            } else if (!endSelect.value) {
+                endSelect.value = match;
+            } else {
+                endSelect.value = match;
+            }
+            updateStopIcons();
+        }
     });
     
     // Map zoom controls
@@ -1388,10 +1421,6 @@ function setupEventListeners() {
             computeRoute();
         }
         
-        if (event.key === 'Escape' && addStopModal.style.display === "flex") {
-            addStopModal.style.display = "none";
-        }
-        
         if (event.key === ' ' && !event.target.matches('input, textarea, select')) {
             event.preventDefault();
             if (busAnimationInterval) {
@@ -1448,6 +1477,8 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM loaded, starting simulation...');
     setTimeout(initializeSimulation, 100);
 });
+
+window.initSimulation = initializeSimulation;
 
 window.initSimulation = initializeSimulation;
 

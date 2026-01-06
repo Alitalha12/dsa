@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lahore Transit Simulation - Live Map</title>
+    <title>Transport Hub Simulation - Live Map</title>
 
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -691,7 +691,7 @@
       <div class="wrap">
       <div class="topbar">
         <div class="title">
-          <h2>🚌 Lahore Transit Simulation - Live Map</h2>
+          <h2>🚌 Transport Hub Simulation - Live Map</h2>
           <div class="sub">
             Real Lahore locations • Auto-connected stops • Live bus tracking
           </div>
@@ -736,9 +736,6 @@
             </button>
             <button type="button" class="btn" id="computeBtn">
               🚀 Compute Route
-            </button>
-            <button type="button" class="btn secondary" id="addStopBtn">
-              ➕ Add Stop
             </button>
           </div>
 
@@ -788,7 +785,7 @@
               ⚖️ Distance Labels
             </label>
             <label class="toggle">
-              <input type="checkbox" id="tLabels" checked />
+              <input type="checkbox" id="tLabels" />
               🏷️ Stop Labels
             </label>
             <label class="toggle">
@@ -844,20 +841,20 @@
           </div>
 
           <div id="simMsg" class="msg">
-            💡 Click on map to add new stops • Select start and destination to find route
+            💡 Select start and destination to find route
           </div>
 
           <div class="hint">
             <b>📍 Real Lahore Locations:</b> Stops are placed at actual Lahore landmarks<br>
-            <b>🔗 Auto-Connect:</b> New stops automatically connect to nearest 3 stops<br>
-            <b>🚌 Bus Animation:</b> Bus follows real road paths between stops
+            <b>🔗 Auto-Connect:</b> Stops connect to nearby nodes for navigation<br>
+            <b>🚌 Bus Animation:</b> Bus follows the computed Dijkstra path
           </div>
         </div>
 
         <!-- RIGHT: MAP -->
         <div class="card canvasCard">
           <div class="sectionTitle" style="margin-bottom: 10px">
-            <h3>🏙️ Lahore Transit Network</h3>
+            <h3>🏙️ Transport Hub Network</h3>
             <span class="pill" id="routePill">Path: Not Selected</span>
           </div>
 
