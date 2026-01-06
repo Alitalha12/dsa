@@ -561,6 +561,7 @@ async function processData(routesData, graphData) {
     coords.clear();
     
     const nodesFromRoutes = extractNodesFromRoutes();
+    hydrateCoordsFromRouteDetails(routesData);
     if (graphData.nodes && graphData.nodes.length > 0) {
         console.log('Using node coordinates from graph data');
         processGraphNodes(graphData.nodes);
@@ -604,22 +605,73 @@ function processGraphNodes(nodes) {
     });
 }
 
+function hydrateCoordsFromRouteDetails(routesData) {
+    const routes = routesData?.routes || [];
+    routes.forEach((route) => {
+        const stopDetails = Array.isArray(route.stop_details) ? route.stop_details : [];
+        stopDetails.forEach((stop) => {
+            if (!stop || typeof stop !== 'object') return;
+            const name = (stop.stop_name || '').toString().trim();
+            const lat = typeof stop.latitude === 'number' ? stop.latitude : parseFloat(stop.latitude);
+            const lng = typeof stop.longitude === 'number' ? stop.longitude : parseFloat(stop.longitude);
+            if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            if (!coords.has(name)) {
+                coords.set(name, { lat, lng });
+                coordsBase.set(name, { lat, lng });
+            }
+        });
+    });
+}
+
 function extractNodesFromRoutes() {
     const nodeSet = new Set();
     
     ROUTES.forEach(route => {
-        if (route.stops && Array.isArray(route.stops)) {
-            route.stops.forEach(stop => {
-                if (stop && typeof stop === 'string') {
-                    nodeSet.add(stop.trim());
+        if (!route.stops || !Array.isArray(route.stops)) return;
+        route.stops.forEach(stop => {
+            if (!stop) return;
+            if (typeof stop === 'string') {
+                nodeSet.add(stop.trim());
+                return;
+            }
+            if (typeof stop === 'object') {
+                const name = (stop.stop_name || stop.name || stop.id || '').toString().trim();
+                if (name) {
+                    nodeSet.add(name);
                 }
-            });
-        }
+            }
+        });
     });
     
     const nodes = Array.from(nodeSet);
     console.log('Extracted nodes:', nodes);
     return nodes;
+}
+
+function populateDropdowns() {
+    if (!startSelect || !endSelect) return;
+
+    const nodes = [...GRAPH.nodes].sort((a, b) => a.localeCompare(b));
+    const currentStart = startSelect.value;
+    const currentEnd = endSelect.value;
+
+    startSelect.innerHTML = '<option value="">Select start</option>';
+    endSelect.innerHTML = '<option value="">Select destination</option>';
+
+    nodes.forEach((node) => {
+        const optionStart = document.createElement('option');
+        optionStart.value = node;
+        optionStart.textContent = node;
+        startSelect.appendChild(optionStart);
+
+        const optionEnd = document.createElement('option');
+        optionEnd.value = node;
+        optionEnd.textContent = node;
+        endSelect.appendChild(optionEnd);
+    });
+
+    if (nodes.includes(currentStart)) startSelect.value = currentStart;
+    if (nodes.includes(currentEnd)) endSelect.value = currentEnd;
 }
 
 function processGraphEdges(edges) {
@@ -704,7 +756,15 @@ function buildEdgesFromRoutes(routesData) {
     const routes = routesData?.routes || [];
 
     routes.forEach((route) => {
-        const stops = Array.isArray(route.stops) ? route.stops : [];
+        const stops = Array.isArray(route.stops)
+            ? route.stops.map((stop) => {
+                if (typeof stop === 'string') return stop;
+                if (stop && typeof stop === 'object') {
+                    return stop.stop_name || stop.name || stop.id || '';
+                }
+                return '';
+            })
+            : [];
         const distances = Array.isArray(route.distances) ? route.distances : [];
 
         for (let i = 0; i < stops.length - 1; i++) {
@@ -1335,8 +1395,6 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM loaded, starting simulation...');
     setTimeout(initializeSimulation, 100);
 });
-
-window.initSimulation = initializeSimulation;
 
 window.initSimulation = initializeSimulation;
 

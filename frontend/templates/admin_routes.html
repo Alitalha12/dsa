@@ -1432,15 +1432,6 @@
 
             // Also setup event listeners for dynamically added elements
             const observer = new MutationObserver(function (mutations) {
-        document.addEventListener('DOMContentLoaded', function () {
-            // Initial setup
-            setupEventListeners();
-            loadRoutes();
-            loadStats();
-            setupAddStopMapInputs();
-
-            // Also setup event listeners for dynamically added elements
-            const observer = new MutationObserver(function (mutations) {
                 mutations.forEach(function (mutation) {
                     if (mutation.addedNodes.length) {
                         setupStopEventListeners();
@@ -1993,16 +1984,6 @@
             if (!submitBtn) {
                 showError('Submit button not found');
                 isCreatingRoute = false;
-                return;
-            }
-            if (!routeName) {
-                showError('Route name is required');
-                return;
-            }
-
-            const submitBtn = document.getElementById('createRouteSubmit');
-            if (!submitBtn) {
-                showError('Submit button not found');
                 return;
             }
 
