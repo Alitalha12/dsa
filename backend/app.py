@@ -66,6 +66,41 @@ def _get_route_service_window(route, travel_date):
         "headway_minutes": headway,
     }
 
+DEFAULT_SERVICE_CALENDAR = {
+    "weekday": {"start_time": "06:00", "end_time": "22:00", "headway_minutes": 15},
+    "weekend": {"start_time": "08:00", "end_time": "20:00", "headway_minutes": 20},
+}
+
+def _parse_time(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value).strip(), "%H:%M").time()
+    except ValueError:
+        return None
+
+def _get_route_service_window(route, travel_date):
+    calendar = route.get("service_calendar") if isinstance(route, dict) else {}
+    calendar = calendar if isinstance(calendar, dict) else {}
+    schedule = {
+        "weekday": {**DEFAULT_SERVICE_CALENDAR["weekday"], **calendar.get("weekday", {})},
+        "weekend": {**DEFAULT_SERVICE_CALENDAR["weekend"], **calendar.get("weekend", {})},
+    }
+    day_key = "weekday"
+    if isinstance(travel_date, datetime):
+        day_key = "weekend" if travel_date.weekday() >= 5 else "weekday"
+    day_schedule = schedule[day_key]
+    headway = day_schedule.get("headway_minutes", DEFAULT_SERVICE_CALENDAR[day_key]["headway_minutes"])
+    try:
+        headway = int(headway)
+    except (TypeError, ValueError):
+        headway = DEFAULT_SERVICE_CALENDAR[day_key]["headway_minutes"]
+    return {
+        "start_time": day_schedule["start_time"],
+        "end_time": day_schedule["end_time"],
+        "headway_minutes": headway,
+    }
+
 def _coord_index(routes_data):
     """
     stop_name -> (lat,lng)
@@ -92,6 +127,9 @@ app = Flask(__name__,
             template_folder='../frontend/templates')
 app.secret_key = 'your-secret-key-here-change-in-production'
 CORS(app)
+
+PASSENGER_QUEUES = {}
+LAST_DEMAND_UPDATE = None
 
 PASSENGER_QUEUES = {}
 LAST_DEMAND_UPDATE = None
@@ -157,6 +195,86 @@ def _unique_stops_from_routes(routes_data):
             if name and name not in stops:
                 stops.append(name)
     return stops
+
+def _poisson(lam):
+    if lam <= 0:
+        return 0
+    L = exp(-lam)
+    k = 0
+    p = 1.0
+    while p > L:
+        k += 1
+        p *= random.random()
+    return max(0, k - 1)
+
+def _simulate_passenger_demand(routes_data, minutes=5):
+    global LAST_DEMAND_UPDATE
+    bus_manager.load_routes()
+    coords = _coord_index(routes_data)
+    stop_rates = {}
+
+    for route in routes_data.get("routes", []):
+        for stop in route.get("stops", []):
+            if not isinstance(stop, dict):
+                continue
+            stop_name = (stop.get("stop_name") or "").strip()
+            if not stop_name:
+                continue
+            arrival_rate = stop.get("arrival_rate", 2.0)
+            try:
+                arrival_rate = float(arrival_rate)
+            except (TypeError, ValueError):
+                arrival_rate = 2.0
+            stop_rates[stop_name] = arrival_rate
+            arrivals = _poisson(arrival_rate * minutes)
+            PASSENGER_QUEUES[stop_name] = PASSENGER_QUEUES.get(stop_name, 0) + arrivals
+
+    for bus in bus_manager.bus_list.get_all_buses():
+        route = bus_manager._find_route_for_bus(bus)
+        if not route:
+            continue
+        stops = route.get("stops", [])
+        if not stops:
+            continue
+        current_index = int(bus.get("current_stop_index", 0))
+        current_index = max(0, min(current_index, len(stops) - 1))
+        stop_name = stops[current_index].get("stop_name")
+        if not stop_name:
+            continue
+
+        queue = PASSENGER_QUEUES.get(stop_name, 0)
+        capacity = int(bus.get("capacity", 50))
+        current_passengers = int(bus.get("current_passengers", 0))
+        available = max(0, capacity - current_passengers)
+        boarding = min(queue, available)
+
+        if boarding > 0:
+            PASSENGER_QUEUES[stop_name] = queue - boarding
+            bus["current_passengers"] = current_passengers + boarding
+            bus_manager.update_bus(bus["id"], {"current_passengers": bus["current_passengers"]})
+
+        next_index = (current_index + 1) % len(stops)
+        bus["current_stop_index"] = next_index
+        bus_manager.update_bus(bus["id"], {"current_stop_index": next_index})
+        next_stop_name = stops[next_index].get("stop_name")
+        if next_stop_name and next_stop_name in coords:
+            lat, lng = coords[next_stop_name]
+            bus_manager.update_bus(bus["id"], {"current_lat": lat, "current_lng": lng})
+
+    LAST_DEMAND_UPDATE = datetime.now().isoformat()
+
+    return {
+        "queues": PASSENGER_QUEUES,
+        "last_updated": LAST_DEMAND_UPDATE
+    }
+
+def _estimate_eta_minutes(current_lat, current_lng, next_lat, next_lng, speed_kmph=30):
+    if current_lat is None or current_lng is None or next_lat is None or next_lng is None:
+        return None
+    distance_km = _haversine_km(current_lat, current_lng, next_lat, next_lng)
+    if speed_kmph <= 0:
+        return None
+    return round((distance_km / speed_kmph) * 60, 1)
 def _build_weighted_graph(routes_data, sim_data=None):
     """
     Undirected weighted graph from routes.json.
@@ -2140,6 +2258,43 @@ def get_live_buses_api():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tracking/update_position', methods=['POST'])
+def update_bus_position_api():
+    if not session.get('logged_in') or session.get('user_type') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    payload = request.get_json(force=True, silent=True) or {}
+    bus_id = payload.get('bus_id')
+    current_lat = payload.get('current_lat')
+    current_lng = payload.get('current_lng')
+    current_stop_index = payload.get('current_stop_index')
+    speed_kmph = payload.get('speed_kmph')
+
+    if bus_id is None:
+        return jsonify({'error': 'bus_id is required'}), 400
+
+    updates = {}
+    if current_lat is not None:
+        updates['current_lat'] = current_lat
+    if current_lng is not None:
+        updates['current_lng'] = current_lng
+    if current_stop_index is not None:
+        try:
+            updates['current_stop_index'] = int(current_stop_index)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'current_stop_index must be an integer'}), 400
+    if speed_kmph is not None:
+        try:
+            updates['speed_kmph'] = int(speed_kmph)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'speed_kmph must be an integer'}), 400
+
+    updated = bus_manager.update_bus(int(bus_id), updates)
+    if not updated:
+        return jsonify({'error': 'Bus not found'}), 404
+
+    return jsonify({'success': True, 'bus_id': bus_id, 'updates': updates})
 
 @app.route('/api/tracking/update_position', methods=['POST'])
 def update_bus_position_api():
