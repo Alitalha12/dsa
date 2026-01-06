@@ -51,9 +51,11 @@ def _coord_index(routes_data):
 
 
 
-app = Flask(__name__, 
-            static_folder='../frontend/static',
-            template_folder='../frontend/templates')
+app = Flask(
+    __name__,
+    static_folder='static',
+    template_folder='templates',
+)
 app.secret_key = 'your-secret-key-here-change-in-production'
 CORS(app)
 
