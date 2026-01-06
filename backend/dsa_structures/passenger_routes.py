@@ -92,61 +92,126 @@ class TransportGraph:
     def __init__(self):
         self.nodes = {}
         self.routes = {}
-    
+        self.fare_per_km = 10.0
+        self.transfer_penalty = 5
+
     def add_stop(self, stop_name: str, location: str, **kwargs) -> None:
         """Add a bus stop to the graph"""
         if stop_name not in self.nodes:
             self.nodes[stop_name] = GraphNode(stop_name, location, **kwargs)
-    
-    def add_connection(self, stop1: str, stop2: str, distance: float, time_minutes: int) -> None:
+
+    def add_connection(
+        self,
+        stop1: str,
+        stop2: str,
+        distance: float,
+        time_minutes: int,
+        route_id: Optional[str] = None,
+        fare: Optional[float] = None,
+    ) -> None:
         """Add connection between two stops"""
         if stop1 in self.nodes and stop2 in self.nodes:
+            edge_fare = fare if fare is not None else distance * self.fare_per_km
             self.nodes[stop1].neighbors[stop2] = {
                 'distance': distance,
-                'time': time_minutes
+                'time': time_minutes,
+                'route_id': route_id,
+                'fare': edge_fare
             }
             self.nodes[stop2].neighbors[stop1] = {
                 'distance': distance,
-                'time': time_minutes
+                'time': time_minutes,
+                'route_id': route_id,
+                'fare': edge_fare
             }
-    
+
     def dijkstra_shortest_path(self, start: str, end: str, criteria: str = 'time') -> Dict:
         """Find shortest path using Dijkstra's Algorithm"""
         if start not in self.nodes or end not in self.nodes:
             return {'path': [], 'total': float('inf'), 'message': 'Invalid stops'}
-        
-        # Priority queue: (distance/time, stop, path)
-        pq = [(0, start, [start])]
+
+        def edge_cost(info: Dict, previous_route: Optional[str]) -> float:
+            if criteria == 'distance':
+                return info['distance']
+            if criteria == 'time':
+                return info['time']
+            if criteria == 'fare':
+                return info.get('fare', info['distance'] * self.fare_per_km)
+            if criteria == 'transfers':
+                transfer = 0
+                if previous_route and info.get('route_id') and info.get('route_id') != previous_route:
+                    transfer = self.transfer_penalty
+                return transfer + (info['distance'] * 0.001)
+            return info['time']
+
+        pq = [(0, start, None)]
+        distances = {(start, None): 0.0}
+        previous = {(start, None): None}
         visited = set()
-        distances = {stop: float('inf') for stop in self.nodes}
-        distances[start] = 0
-        
+
         while pq:
-            current_dist, current_stop, path = heapq.heappop(pq)
-            
-            if current_stop in visited:
+            current_dist, current_stop, current_route = heapq.heappop(pq)
+
+            state = (current_stop, current_route)
+            if state in visited:
                 continue
-            
-            visited.add(current_stop)
-            
+
+            visited.add(state)
+
             # If we reached destination
             if current_stop == end:
-                return {
-                    'path': path,
-                    'total_time': current_dist if criteria == 'time' else None,
-                    'total_distance': current_dist if criteria == 'distance' else None,
-                    'stops': len(path) - 1
-                }
-            
+                break
+
             # Explore neighbors
             for neighbor, info in self.nodes[current_stop].neighbors.items():
-                if neighbor not in visited:
-                    new_dist = current_dist + info[criteria]
-                    if new_dist < distances[neighbor]:
-                        distances[neighbor] = new_dist
-                        heapq.heappush(pq, (new_dist, neighbor, path + [neighbor]))
-        
-        return {'path': [], 'total': float('inf'), 'message': 'No path found'}
+                next_route = info.get('route_id')
+                next_state = (neighbor, next_route)
+                if next_state in visited:
+                    continue
+                new_dist = current_dist + edge_cost(info, current_route)
+                if new_dist < distances.get(next_state, float('inf')):
+                    distances[next_state] = new_dist
+                    previous[next_state] = (current_stop, current_route)
+                    heapq.heappush(pq, (new_dist, neighbor, next_route))
+
+        end_states = [(state, dist) for state, dist in distances.items() if state[0] == end]
+        if not end_states:
+            return {'path': [], 'total': float('inf'), 'message': 'No path found'}
+
+        best_state, best_cost = min(end_states, key=lambda item: item[1])
+
+        path = []
+        current = best_state
+        while current:
+            path.append(current[0])
+            current = previous.get(current)
+        path.reverse()
+
+        total_distance = 0.0
+        total_time = 0.0
+        total_fare = 0.0
+        transfers = 0
+        last_route = None
+        for idx in range(len(path) - 1):
+            info = self.nodes[path[idx]].neighbors[path[idx + 1]]
+            total_distance += info['distance']
+            total_time += info['time']
+            total_fare += info.get('fare', info['distance'] * self.fare_per_km)
+            route_id = info.get('route_id')
+            if last_route and route_id and route_id != last_route:
+                transfers += 1
+            if route_id:
+                last_route = route_id
+
+        return {
+            'path': path,
+            'total_time': total_time,
+            'total_distance': total_distance,
+            'total_fare': round(total_fare, 2),
+            'transfers': transfers,
+            'cost': best_cost,
+            'stops': len(path) - 1
+        }
     
     def bfs_nearest_stop(self, start: str, target_location: str) -> Dict:
         """Find nearest bus stop using BFS"""
@@ -466,7 +531,7 @@ class PassengerBookingSystem:
         """Build transport graph from routes data"""
         if 'routes' not in self.routes:
             return
-        
+
         for route in self.routes['routes']:
             stops = route.get('stops', [])
             route_id = route.get('route_id', '')
@@ -491,13 +556,23 @@ class PassengerBookingSystem:
                 stop1 = stops[i].get('stop_name', '')
                 stop2 = stops[i + 1].get('stop_name', '')
                 wait_time = stops[i].get('wait_time', 5)
-                
+                distance = stops[i + 1].get('distance_from_previous', 5.0)
+                try:
+                    distance = float(distance)
+                except (TypeError, ValueError):
+                    distance = 5.0
+
+                travel_minutes = int(distance * 2) + int(wait_time)
+                fare = distance * 10
+
                 # Add connection with travel time (estimated 5 minutes between stops + wait time)
                 self.transport_graph.add_connection(
                     stop1=stop1,
                     stop2=stop2,
-                    distance=5.0,  # Estimated 5km between stops
-                    time_minutes=5 + wait_time
+                    distance=distance,
+                    time_minutes=travel_minutes,
+                    route_id=route_id,
+                    fare=fare
                 )
     
     # ===================== PASSENGER MANAGEMENT =====================

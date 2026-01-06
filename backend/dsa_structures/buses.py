@@ -1,6 +1,7 @@
 # data_structures/buses.py
 import json
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
+import os
 import heapq
 from typing import List, Dict, Optional
 
@@ -276,13 +277,74 @@ class BusGraph:
 
 class BusManager:
     """Main Bus Management System"""
-    def __init__(self, data_file: str = 'data/buses.json'):
+    def __init__(self, data_file: str = 'data/buses.json', routes_file: str = 'data/routes.json'):
         self.data_file = data_file
+        self.routes_file = routes_file
+        self.routes_index = {"by_id": {}, "by_name": {}}
         self.bus_list = DoublyLinkedListBus()
         self.min_heap_arrival = MinHeapBusArrival()
         self.max_heap_priority = MaxHeapBusPriority()
         self.bus_graph = BusGraph()
+        self.load_routes()
         self.load_data()
+
+    def load_routes(self):
+        if not os.path.exists(self.routes_file):
+            return
+        try:
+            with open(self.routes_file, 'r') as f:
+                data = json.load(f)
+            for route in data.get('routes', []):
+                route_id = route.get('route_id')
+                route_name = route.get('route_name')
+                if route_id:
+                    self.routes_index["by_id"][str(route_id)] = route
+                if route_name:
+                    self.routes_index["by_name"][route_name] = route
+        except Exception as e:
+            print(f"Error loading routes: {e}")
+
+    def _find_route_for_bus(self, bus):
+        route_id = bus.get('route_id')
+        route_name = bus.get('route_name')
+        if route_id and str(route_id) in self.routes_index["by_id"]:
+            return self.routes_index["by_id"][str(route_id)]
+        if route_name and route_name in self.routes_index["by_name"]:
+            return self.routes_index["by_name"][route_name]
+        return None
+
+    def _compute_next_arrival(self, route):
+        service = route.get('service_calendar', {})
+        schedule = service.get('weekday', {'start_time': '06:00', 'end_time': '22:00', 'headway_minutes': 15})
+        start_time = schedule.get('start_time', '06:00')
+        headway = schedule.get('headway_minutes', 15)
+        try:
+            headway = int(headway)
+        except (TypeError, ValueError):
+            headway = 15
+        current_time = datetime.now().time()
+        base = datetime.strptime(start_time, "%H:%M").time()
+        base_dt = datetime.combine(datetime.today(), base)
+        current_dt = datetime.combine(datetime.today(), current_time)
+        if current_dt <= base_dt:
+            return base_dt.time().strftime("%H:%M")
+        diff = int((current_dt - base_dt).total_seconds() / 60)
+        intervals = (diff + headway - 1) // headway
+        next_dt = base_dt + timedelta(minutes=intervals * headway)
+        return next_dt.time().strftime("%H:%M")
+
+    def _normalize_bus_fields(self, bus):
+        bus.setdefault('current_stop_index', 0)
+        bus.setdefault('speed_kmph', 35)
+        bus.setdefault('current_lat', None)
+        bus.setdefault('current_lng', None)
+        bus.setdefault('current_passengers', 0)
+        if bus.get('next_arrival') in (None, "", "auto"):
+            route = self._find_route_for_bus(bus)
+            if route:
+                bus['next_arrival'] = self._compute_next_arrival(route)
+            else:
+                bus['next_arrival'] = '08:00'
     
     def load_data(self):
         """Load bus data from JSON file"""
@@ -290,6 +352,7 @@ class BusManager:
             with open(self.data_file, 'r') as f:
                 buses = json.load(f)
                 for bus in buses:
+                    self._normalize_bus_fields(bus)
                     self.bus_list.add_bus(bus)
                     self.min_heap_arrival.push(bus)
                     self.max_heap_priority.push(bus)
@@ -313,6 +376,8 @@ class BusManager:
         bus_data['created_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         bus_data['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        self._normalize_bus_fields(bus_data)
+
         # Add to data structures
         self.bus_list.add_bus(bus_data)
         self.min_heap_arrival.push(bus_data)
@@ -325,6 +390,12 @@ class BusManager:
     
     def update_bus(self, bus_id: int, updated_data: Dict) -> bool:
         """Update existing bus"""
+        if updated_data.get('next_arrival') == 'auto':
+            bus_node = self.bus_list.find_bus(bus_id)
+            if bus_node:
+                route = self._find_route_for_bus(bus_node.bus_data)
+                if route:
+                    updated_data['next_arrival'] = self._compute_next_arrival(route)
         success = self.bus_list.update_bus(bus_id, updated_data)
         
         if success:
@@ -348,28 +419,34 @@ class BusManager:
             self.save_data()
         
         return success
+
+    def update_bus_position(self, bus_id: int, lat: float, lng: float, stop_index: Optional[int] = None) -> bool:
+        updates = {'current_lat': lat, 'current_lng': lng}
+        if stop_index is not None:
+            updates['current_stop_index'] = stop_index
+        return self.update_bus(bus_id, updates)
     
-   # In BusManager class, update the allocate_bus_to_route method
-def allocate_bus_to_route(self, bus_id, route_id, route_name):
-    """Allocate bus to specific route - UPDATED for UUID routes"""
-    bus_node = self.bus_list.find_bus(bus_id)
-    
-    if bus_node:
-        bus_node.bus_data['route_id'] = route_id  # Store as string (UUID)
-        bus_node.bus_data['route_name'] = route_name
+    def allocate_bus_to_route(self, bus_id, route_id, route_name):
+        """Allocate bus to specific route - UPDATED for UUID routes"""
+        bus_node = self.bus_list.find_bus(bus_id)
         
-        # Update demand based on route (simulated)
-        bus_node.bus_data['route_demand'] = 50
+        if bus_node:
+            bus_node.bus_data['route_id'] = route_id  # Store as string (UUID)
+            bus_node.bus_data['route_name'] = route_name
+            
+            # Update demand based on route (simulated)
+            bus_node.bus_data['route_demand'] = 50
+            self._normalize_bus_fields(bus_node.bus_data)
+            
+            # Rebuild heaps
+            all_buses = self.bus_list.get_all_buses()
+            self.min_heap_arrival.rebuild_heap(all_buses)
+            self.max_heap_priority.rebuild_heap(all_buses)
+            self.save_data()
+            
+            return True
         
-        # Rebuild heaps
-        all_buses = self.bus_list.get_all_buses()
-        self.min_heap_arrival.rebuild_heap(all_buses)
-        self.max_heap_priority.rebuild_heap(all_buses)
-        self.save_data()
-        
-        return True
-    
-    return False
+        return False
     
     def get_next_arrival(self) -> Optional[Dict]:
         """Get next arriving bus"""
