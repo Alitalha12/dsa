@@ -473,6 +473,20 @@
             margin-top: 6px;
         }
 
+        .map-picker {
+            height: 240px;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .map-hint {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 6px;
+        }
+
         .form-actions {
             display: flex;
             gap: 10px;
@@ -911,14 +925,6 @@
                         <div class="form-hint">Click on the map to set latitude/longitude.</div>
                         <div class="row" style="gap: 10px; margin-top: 10px;">
                             <div style="flex: 1;">
-                                <input type="text" id="stopSearch" class="form-control" placeholder="Search location (e.g., Liberty Market)">
-                            </div>
-                            <div>
-                                <button type="button" class="btn-secondary" id="stopSearchBtn">Search</button>
-                            </div>
-                        </div>
-                        <div class="row" style="gap: 10px; margin-top: 10px;">
-                            <div style="flex: 1;">
                                 <input type="number" id="stopLat" class="form-control" placeholder="Latitude" step="0.000001" required>
                             </div>
                             <div style="flex: 1;">
@@ -1248,7 +1254,6 @@
             loadRoutes();
             loadStats();
             setupAddStopMapInputs();
-            setupEditStopMapInputs();
 
             // Also setup event listeners for dynamically added elements
             const observer = new MutationObserver(function (mutations) {
@@ -1268,15 +1273,10 @@
         const LAHORE_CENTER = [31.5204, 74.3587];
         let addStopMap = null;
         let addStopMarker = null;
-        let editStopMap = null;
-        let editStopMarker = null;
 
         function setupAddStopMapInputs() {
             const latInput = document.getElementById('stopLat');
             const lngInput = document.getElementById('stopLng');
-            const searchInput = document.getElementById('stopSearch');
-            const searchBtn = document.getElementById('stopSearchBtn');
-            const stopNameInput = document.getElementById('stopName');
             if (!latInput || !lngInput) return;
 
             const onInputChange = () => {
@@ -1289,80 +1289,6 @@
 
             latInput.addEventListener('input', onInputChange);
             lngInput.addEventListener('input', onInputChange);
-
-            const onSearch = () => {
-                const query = searchInput ? searchInput.value.trim() : '';
-                if (!query) {
-                    showError('Please enter a location to search');
-                    return;
-                }
-                geocodeStopLocation(query);
-            };
-
-            if (searchBtn) {
-                searchBtn.addEventListener('click', onSearch);
-            }
-
-            if (searchInput) {
-                searchInput.addEventListener('keydown', (event) => {
-                    if (event.key === 'Enter') {
-                        event.preventDefault();
-                        onSearch();
-                    }
-                });
-            }
-
-            if (stopNameInput) {
-                stopNameInput.addEventListener('blur', () => {
-                    const name = stopNameInput.value.trim();
-                    if (!name) return;
-                    if (searchInput && !searchInput.value.trim()) {
-                        searchInput.value = name;
-                    }
-                    geocodeStopLocation(name);
-                });
-            }
-        }
-
-        function setupEditStopMapInputs() {
-            const latInput = document.getElementById('editStopLat');
-            const lngInput = document.getElementById('editStopLng');
-            const searchInput = document.getElementById('editStopSearch');
-            const searchBtn = document.getElementById('editStopSearchBtn');
-            if (!latInput || !lngInput) return;
-
-            const onInputChange = () => {
-                const lat = parseFloat(latInput.value);
-                const lng = parseFloat(lngInput.value);
-                if (Number.isFinite(lat) && Number.isFinite(lng)) {
-                    updateEditStopMarker(lat, lng);
-                }
-            };
-
-            latInput.addEventListener('input', onInputChange);
-            lngInput.addEventListener('input', onInputChange);
-
-            const onSearch = () => {
-                const query = searchInput ? searchInput.value.trim() : '';
-                if (!query) {
-                    showError('Please enter a location to search');
-                    return;
-                }
-                geocodeEditStopLocation(query);
-            };
-
-            if (searchBtn) {
-                searchBtn.addEventListener('click', onSearch);
-            }
-
-            if (searchInput) {
-                searchInput.addEventListener('keydown', (event) => {
-                    if (event.key === 'Enter') {
-                        event.preventDefault();
-                        onSearch();
-                    }
-                });
-            }
         }
 
         function initAddStopMap() {
@@ -1392,33 +1318,6 @@
             }, 200);
         }
 
-        function initEditStopMap() {
-            const mapEl = document.getElementById('editStopMap');
-            if (!mapEl) return;
-
-            if (!editStopMap) {
-                editStopMap = L.map(mapEl, {
-                    center: LAHORE_CENTER,
-                    zoom: 12,
-                    zoomControl: true
-                });
-
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors',
-                    maxZoom: 19
-                }).addTo(editStopMap);
-
-                editStopMap.on('click', function (event) {
-                    const { lat, lng } = event.latlng;
-                    setEditStopCoordinates(lat, lng);
-                });
-            }
-
-            setTimeout(() => {
-                editStopMap.invalidateSize();
-            }, 200);
-        }
-
         function setAddStopCoordinates(lat, lng) {
             const latInput = document.getElementById('stopLat');
             const lngInput = document.getElementById('stopLng');
@@ -1439,82 +1338,6 @@
                 addStopMarker.setLatLng([lat, lng]);
             }
             addStopMap.panTo([lat, lng], { animate: true, duration: 0.4 });
-        }
-
-        function setEditStopCoordinates(lat, lng) {
-            const latInput = document.getElementById('editStopLat');
-            const lngInput = document.getElementById('editStopLng');
-            if (latInput) latInput.value = lat.toFixed(6);
-            if (lngInput) lngInput.value = lng.toFixed(6);
-            updateEditStopMarker(lat, lng);
-        }
-
-        function updateEditStopMarker(lat, lng) {
-            if (!editStopMap) return;
-            if (!editStopMarker) {
-                editStopMarker = L.marker([lat, lng], { draggable: true }).addTo(editStopMap);
-                editStopMarker.on('dragend', function (event) {
-                    const pos = event.target.getLatLng();
-                    setEditStopCoordinates(pos.lat, pos.lng);
-                });
-            } else {
-                editStopMarker.setLatLng([lat, lng]);
-            }
-            editStopMap.panTo([lat, lng], { animate: true, duration: 0.4 });
-        }
-
-        async function geocodeStopLocation(query) {
-            try {
-                const response = await fetch(
-                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`
-                );
-                if (!response.ok) {
-                    throw new Error(`Search failed (HTTP ${response.status})`);
-                }
-                const results = await response.json();
-                if (!results.length) {
-                    showError('No results found for that location');
-                    return;
-                }
-                const result = results[0];
-                const lat = parseFloat(result.lat);
-                const lng = parseFloat(result.lon);
-                if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-                    showError('Invalid coordinates returned by search');
-                    return;
-                }
-                setAddStopCoordinates(lat, lng);
-            } catch (error) {
-                console.error('Geocode error:', error);
-                showError('Location search failed. Please try again.');
-            }
-        }
-
-        async function geocodeEditStopLocation(query) {
-            try {
-                const response = await fetch(
-                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`
-                );
-                if (!response.ok) {
-                    throw new Error(`Search failed (HTTP ${response.status})`);
-                }
-                const results = await response.json();
-                if (!results.length) {
-                    showError('No results found for that location');
-                    return;
-                }
-                const result = results[0];
-                const lat = parseFloat(result.lat);
-                const lng = parseFloat(result.lon);
-                if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-                    showError('Invalid coordinates returned by search');
-                    return;
-                }
-                setEditStopCoordinates(lat, lng);
-            } catch (error) {
-                console.error('Geocode error:', error);
-                showError('Location search failed. Please try again.');
-            }
         }
 
         // Modal functions
