@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Tickets - Smart Transport Hub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .tickets-container {
+            padding: 30px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .tickets-header {
+            background: linear-gradient(135deg, #0d9488, #0f766e);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(13, 148, 136, 0.3);
+        }
+        
+        .tickets-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        .ticket-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            border-left: 5px solid #0d9488;
+        }
+        
+        .ticket-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .ticket-id {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #0d9488;
+        }
+        
+        .ticket-status {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        
+        .status-confirmed { background: #d1fae5; color: #065f46; }
+        .status-cancelled { background: #fee2e2; color: #991b1b; }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        
+        .ticket-details {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .detail-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #475569;
+        }
+        
+        .detail-item i {
+            color: #0d9488;
+            width: 20px;
+        }
+        
+        .ticket-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .btn {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-download {
+            background: #0d9488;
+            color: white;
+        }
+        
+        .btn-download:hover {
+            background: #0f766e;
+        }
+        
+        .btn-cancel {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-cancel:hover {
+            background: #dc2626;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .no-tickets {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .no-tickets i {
+            font-size: 4rem;
+            color: #cbd5e1;
+            margin-bottom: 20px;
+        }
+        
+        .no-tickets h3 {
+            color: #64748b;
+            margin-bottom: 10px;
+        }
+        
+        .no-tickets p {
+            color: #94a3b8;
+            margin-bottom: 20px;
+        }
+        
+        .btn-primary {
+            padding: 12px 25px;
+            background: #0d9488;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn-primary:hover {
+            background: #0f766e;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(13, 148, 136, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <!-- Use same sidebar and header as passenger_dashboard -->
+    <!-- Copy the entire sidebar and header section from passenger_dashboard.html -->
+    <!-- Then replace the content area with this: -->
+    
+    <div class="main-content">
+        <!-- Copy header from passenger_dashboard.html -->
+        <div class="header">
+            <!-- Same header as passenger_dashboard -->
+        </div>
+        
+        <div class="tickets-container">
+            <div class="tickets-header">
+                <h1><i class="fas fa-ticket-alt"></i> My Tickets</h1>
+                <p>View and manage all your bus tickets</p>
+            </div>
+            
+            {% if tickets %}
+                {% for ticket in tickets %}
+                <div class="ticket-card">
+                    <div class="ticket-header">
+                        <div class="ticket-id">{{ ticket.ticket_id }}</div>
+                        <div class="ticket-status status-{{ ticket.status }}">
+                            {{ ticket.status|upper }}
+                        </div>
+                    </div>
+                    
+                    <div class="ticket-details">
+                        <div class="detail-item">
+                            <i class="fas fa-route"></i>
+                            <span><strong>Route:</strong> {{ ticket.from_stop }} → {{ ticket.to_stop }}</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-bus"></i>
+                            <span><strong>Bus:</strong> {{ ticket.bus_number }}</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-calendar-alt"></i>
+                            <span><strong>Date:</strong> {{ ticket.travel_date }}</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-clock"></i>
+                            <span><strong>Time:</strong> {{ ticket.departure_time }} - {{ ticket.arrival_time }}</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-chair"></i>
+                            <span><strong>Seat:</strong> {{ ticket.seat_number }}</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-wallet"></i>
+                            <span><strong>Fare:</strong> Rs. {{ ticket.fare }}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="ticket-actions">
+                        <a href="/download/ticket/{{ ticket.ticket_id }}" class="btn btn-download">
+                            <i class="fas fa-download"></i> Download
+                        </a>
+                        {% if ticket.status == 'confirmed' %}
+                        <button class="btn btn-cancel" onclick="cancelTicket('{{ ticket.ticket_id }}')">
+                            <i class="fas fa-times"></i> Cancel
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-tickets">
+                    <i class="fas fa-ticket-alt"></i>
+                    <h3>No Tickets Found</h3>
+                    <p>You haven't booked any tickets yet.</p>
+                    <a href="{{ url_for('passenger_book_ticket') }}" class="btn-primary">
+                        <i class="fas fa-bus"></i> Book Your First Ticket
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        function cancelTicket(ticketId) {
+            if (confirm('Are you sure you want to cancel this ticket?')) {
+                fetch(`/api/book/cancel_ticket/${ticketId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Ticket cancelled successfully!');
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    alert('Network error. Please try again.');
+                });
+            }
+        }
+    </script>
+</body>
+</html>
