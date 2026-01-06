@@ -578,7 +578,7 @@
             
             buses.forEach(bus => {
                 // Calculate progress (random for demo)
-                const progress = Math.floor(Math.random() * 100);
+                const progress = bus.capacity ? Math.min(100, Math.round((bus.passenger_count / bus.capacity) * 100)) : 0;
                 
                 html += `
                     <div class="bus-card" data-bus="${bus.bus_number}" onclick="selectBusForTracking('${bus.bus_number}')">
@@ -612,7 +612,7 @@
                             </div>
                             <div class="detail-item">
                                 <i class="fas fa-clock"></i>
-                                <span>ETA: ${bus.eta}</span>
+                                <span>ETA: ${bus.eta_minutes !== null && bus.eta_minutes !== undefined ? bus.eta_minutes + ' min' : 'N/A'}</span>
                             </div>
                         </div>
                         
